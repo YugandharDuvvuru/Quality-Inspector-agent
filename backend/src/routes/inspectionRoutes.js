@@ -38,18 +38,26 @@ const inspectionSchema = z
     path: ["image_media_type"],
   });
 
-inspectionRouter.get("/", (_req, res) => {
-  res.json({ inspections: listInspections() });
+inspectionRouter.get("/", async (_req, res, next) => {
+  try {
+    res.json({ inspections: await listInspections() });
+  } catch (error) {
+    next(error);
+  }
 });
 
-inspectionRouter.get("/:componentId", (req, res) => {
-  const inspection = getInspectionByComponentId(req.params.componentId);
+inspectionRouter.get("/:componentId", async (req, res, next) => {
+  try {
+    const inspection = await getInspectionByComponentId(req.params.componentId);
 
-  if (!inspection) {
-    return res.status(404).json({ message: "Inspection not found" });
+    if (!inspection) {
+      return res.status(404).json({ message: "Inspection not found" });
+    }
+
+    return res.json(inspection);
+  } catch (error) {
+    return next(error);
   }
-
-  return res.json(inspection);
 });
 
 inspectionRouter.post("/", async (req, res, next) => {

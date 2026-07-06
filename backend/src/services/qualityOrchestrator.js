@@ -4,25 +4,57 @@ import { runRootCauseAnalystAgent } from "../agents/rootCauseAnalystAgent.js";
 import { runSeverityClassifierAgent } from "../agents/severityClassifierAgent.js";
 import { runVisionInspectorAgent } from "../agents/visionInspectorAgent.js";
 import { env } from "../config/env.js";
+import { isDatabaseReady } from "../db/connection.js";
 import { buildQualityInspectionPrompt } from "../prompts/qualityInspectionPrompt.js";
+import {
+  getLatestInspectionByComponentIdFromDatabase,
+  listLatestInspectionsFromDatabase,
+  saveInspectionToDatabase,
+} from "../repositories/inspectionRepository.js";
 import { validateInspectionResult } from "../schemas/inspectionResultSchema.js";
 import { extractJsonObject, invokeQualityInspectionModel } from "./bedrockClient.js";
 
 const inspectionMemory = new Map();
 const CONFIDENCE_THRESHOLD = 0.75;
 
-export function listInspections() {
+export async function listInspections() {
+  if (isDatabaseReady()) {
+    try {
+      const inspections = await listLatestInspectionsFromDatabase();
+
+      if (inspections.length || inspectionMemory.size === 0) {
+        return inspections;
+      }
+    } catch (error) {
+      console.error(`[database] failed to list inspections. reason=${error.message}`);
+    }
+  }
+
   return Array.from(inspectionMemory.values()).sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 }
 
-export function getInspectionByComponentId(componentId) {
-  return inspectionMemory.get(componentId);
+export async function getInspectionByComponentId(componentId) {
+  if (isDatabaseReady()) {
+    try {
+      const inspection = await getLatestInspectionByComponentIdFromDatabase(componentId);
+
+      if (inspection) {
+        return inspection;
+      }
+    } catch (error) {
+      console.error(
+        `[database] failed to load inspection for component=${componentId}. reason=${error.message}`
+      );
+    }
+  }
+
+  return inspectionMemory.get(componentId) || null;
 }
 
 export async function runInspection(input) {
-  const previousResult = inspectionMemory.get(input.component_id);
+  const previousResult = await getInspectionByComponentId(input.component_id);
 
   console.log(
     `[inspection] component=${input.component_id} bedrockEnabled=${env.BEDROCK_ENABLED}`
@@ -39,6 +71,17 @@ export async function runInspection(input) {
   };
 
   inspectionMemory.set(input.component_id, storedResult);
+
+  if (isDatabaseReady()) {
+    try {
+      await saveInspectionToDatabase({ input, result: storedResult });
+    } catch (error) {
+      console.error(
+        `[database] failed to persist inspection for component=${input.component_id}. reason=${error.message}`
+      );
+    }
+  }
+
   return storedResult;
 }
 

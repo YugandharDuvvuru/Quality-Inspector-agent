@@ -22,15 +22,31 @@ const configuredFrontendOrigins = process.env.FRONTEND_ORIGIN
   ? process.env.FRONTEND_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean)
   : defaultFrontendOrigins;
 
+const toBoolean = (value, defaultValue = false) => {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return String(value).trim().toLowerCase() === "true";
+};
+
 export const env = {
   ENV_FILE_PATH: envFilePath,
   PORT: Number(process.env.PORT || 4000),
   NODE_ENV: process.env.NODE_ENV || "development",
   FRONTEND_ORIGINS: configuredFrontendOrigins,
-  BEDROCK_ENABLED: process.env.BEDROCK_ENABLED === "true",
+  BEDROCK_ENABLED: toBoolean(process.env.BEDROCK_ENABLED),
   AWS_REGION: process.env.AWS_REGION || "us-east-1",
   BEDROCK_MODEL_ID:
     process.env.BEDROCK_MODEL_ID || "anthropic.claude-3-5-sonnet-20240620-v1:0",
+  DATABASE_ENABLED: toBoolean(process.env.DATABASE_ENABLED),
+  DATABASE_URL: process.env.DATABASE_URL?.trim() || "",
+  DATABASE_SSL: toBoolean(process.env.DATABASE_SSL),
+  DATABASE_AUTO_MIGRATE: toBoolean(process.env.DATABASE_AUTO_MIGRATE, true),
   AWS_ACCESS_KEY_ID_PRESENT: Boolean(process.env.AWS_ACCESS_KEY_ID),
   AWS_SECRET_ACCESS_KEY_PRESENT: Boolean(process.env.AWS_SECRET_ACCESS_KEY),
   AWS_SESSION_TOKEN_PRESENT: Boolean(process.env.AWS_SESSION_TOKEN),
