@@ -1,0 +1,405 @@
+:root {
+  color: #1b1f23;
+  background: #f4f7f5;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.top-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+
+.eyebrow {
+  margin: 0 0 7px;
+  color: #5c6b62;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  color: #18201c;
+  font-size: clamp(2rem, 4vw, 4.25rem);
+  line-height: 1;
+}
+
+h2 {
+  margin-bottom: 0;
+  color: #18201c;
+  font-size: 1.25rem;
+}
+
+h3 {
+  margin-bottom: 12px;
+  font-size: 0.98rem;
+}
+
+.status-strip,
+.button-row,
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.status-pill,
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #dbe4dd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #33423a;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.panel {
+  border: 1px solid #d7e0da;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 50px rgba(30, 52, 39, 0.07);
+}
+
+.form-panel,
+.result-stack .panel,
+.history-panel {
+  padding: 20px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.icon-button {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid #cbd8d1;
+  border-radius: 8px;
+  background: #f9fbfa;
+  color: #123226;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.field span {
+  color: #4a5c51;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  border: 1px solid #ccd9d2;
+  border-radius: 8px;
+  background: #fbfdfc;
+  color: #1d2722;
+  outline: none;
+}
+
+.field input {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.field textarea {
+  resize: vertical;
+  padding: 12px;
+}
+
+.upload-field input {
+  padding: 10px 12px;
+}
+
+.upload-field small {
+  color: #65756b;
+  font-weight: 700;
+}
+
+.field input:focus,
+.field textarea:focus {
+  border-color: #28775a;
+  box-shadow: 0 0 0 3px rgba(40, 119, 90, 0.14);
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 42px;
+  border-radius: 8px;
+  padding: 0 16px;
+  font-weight: 800;
+}
+
+.primary-button {
+  border: 1px solid #225a45;
+  background: #225a45;
+  color: #ffffff;
+}
+
+.secondary-button {
+  border: 1px solid #cbd8d1;
+  background: #ffffff;
+  color: #24362d;
+}
+
+.button-row {
+  margin-top: 18px;
+}
+
+.result-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.decision-panel {
+  border-left: 6px solid #8a9690;
+}
+
+.decision-panel.success {
+  border-left-color: #1f8f57;
+}
+
+.decision-panel.warning {
+  border-left-color: #c98416;
+}
+
+.decision-panel.danger {
+  border-left-color: #c63b32;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric {
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+  background: #f8fbf9;
+}
+
+.metric span {
+  display: block;
+  margin-bottom: 7px;
+  color: #617368;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.metric strong {
+  overflow-wrap: anywhere;
+  color: #16221c;
+}
+
+.decision-text {
+  margin: 16px 0 0;
+  color: #435149;
+  line-height: 1.6;
+}
+
+.result-view {
+  display: grid;
+  gap: 18px;
+}
+
+.result-view section {
+  padding: 14px;
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.result-card,
+.action-item,
+.history-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.action-list {
+  display: grid;
+  gap: 8px;
+}
+
+.result-card span,
+.action-item span,
+.history-item small,
+.muted {
+  color: #65756b;
+}
+
+details {
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+summary {
+  color: #24362d;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+pre {
+  overflow: auto;
+  max-height: 420px;
+  margin-bottom: 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: #17201b;
+  color: #eff7f2;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: #66766c;
+  text-align: center;
+}
+
+.history-panel {
+  margin-top: 18px;
+}
+
+.history-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.history-item {
+  border-color: #dce5df;
+  text-align: left;
+}
+
+.history-item strong {
+  color: #225a45;
+}
+
+.error-message {
+  margin: 14px 0 0;
+  color: #b42318;
+  font-weight: 800;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 980px) {
+  .top-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-grid,
+  .history-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .app-shell {
+    padding: 18px;
+  }
+
+  .field-grid,
+  .metric-grid,
+  .history-list {
+    grid-template-columns: 1fr;
+  }
+
+  .button-row .primary-button,
+  .button-row .secondary-button {
+    flex: 1 1 100%;
+  }
+}
