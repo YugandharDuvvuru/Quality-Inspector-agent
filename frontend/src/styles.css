@@ -39,6 +39,13 @@ button {
   margin-bottom: 22px;
 }
 
+.runtime-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
 .eyebrow {
   margin: 0 0 7px;
   color: #5c6b62;
@@ -242,6 +249,12 @@ h3 {
   gap: 10px;
 }
 
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .metric {
   min-height: 78px;
   padding: 12px;
@@ -265,6 +278,19 @@ h3 {
 
 .decision-text {
   margin: 16px 0 0;
+  color: #435149;
+  line-height: 1.6;
+}
+
+.decision-badges {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fallback-note,
+.agent-summary {
+  margin: 12px 0 0;
   color: #435149;
   line-height: 1.6;
 }
@@ -302,6 +328,48 @@ h3 {
 .history-item small,
 .muted {
   color: #65756b;
+}
+
+.history-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.source-badge.compact {
+  min-height: 26px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+}
+
+.source-badge.bedrock {
+  background: #e8f7ee;
+  color: #1f6c49;
+  border: 1px solid #bfe2cd;
+}
+
+.source-badge.fallback {
+  background: #fff4e5;
+  color: #9a5a00;
+  border: 1px solid #f0d19d;
+}
+
+.source-badge.neutral {
+  background: #eef2f0;
+  color: #52645a;
+  border: 1px solid #d5ddd8;
 }
 
 details {
@@ -381,6 +449,7 @@ pre {
     grid-template-columns: 1fr;
   }
 
+  .agent-grid,
   .metric-grid,
   .history-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -392,6 +461,7 @@ pre {
     padding: 18px;
   }
 
+  .agent-grid,
   .field-grid,
   .metric-grid,
   .history-list {

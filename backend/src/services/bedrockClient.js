@@ -2,6 +2,8 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 import { env } from "../config/env.js";
 
 const client = new BedrockRuntimeClient({ region: env.AWS_REGION });
+const BEDROCK_RUNTIME_PACKAGE_VERSION = "^3.600.0";
+const LANGGRAPH_PACKAGE_VERSION = "latest";
 
 export async function invokeQualityInspectionModel({ prompt, image }) {
   // console.log(
@@ -52,6 +54,40 @@ export function extractJsonObject(text) {
   }
 
   return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+}
+
+export function getBedrockDebugInfo() {
+  return {
+    enabled: env.BEDROCK_ENABLED,
+    region: env.AWS_REGION,
+    modelId: env.BEDROCK_MODEL_ID,
+    clientType: "BedrockRuntimeClient + InvokeModelCommand",
+    packageVersions: {
+      "@aws-sdk/client-bedrock-runtime": BEDROCK_RUNTIME_PACKAGE_VERSION,
+      "@langchain/langgraph": LANGGRAPH_PACKAGE_VERSION,
+    },
+    credentialsPresent: {
+      accessKey: env.AWS_ACCESS_KEY_ID_PRESENT,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY_PRESENT,
+      sessionToken: env.AWS_SESSION_TOKEN_PRESENT,
+    },
+  };
+}
+
+export async function probeBedrockRuntime() {
+  const prompt = [
+    "You are a probe endpoint for a manufacturing quality inspection application.",
+    "Reply with exactly one line containing the word OK.",
+  ].join(" ");
+
+  const responseText = await invokeQualityInspectionModel({ prompt, image: null });
+
+  return {
+    ok: true,
+    region: env.AWS_REGION,
+    modelId: env.BEDROCK_MODEL_ID,
+    responsePreview: responseText.slice(0, 160),
+  };
 }
 
 function maskValue(value) {

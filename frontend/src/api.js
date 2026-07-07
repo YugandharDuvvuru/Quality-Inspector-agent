@@ -28,3 +28,14 @@ export async function fetchInspections() {
 
   return data.inspections;
 }
+
+export async function fetchHealthStatus() {
+  const response = await fetch(`${API_BASE_URL}/api/health`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || "Could not load system health");
+  }
+
+  return data;
+}

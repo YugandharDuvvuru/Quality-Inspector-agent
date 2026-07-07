@@ -84,7 +84,7 @@ export async function initializeDatabase() {
   if (!env.DATABASE_ENABLED) {
     databaseReady = false;
     databaseError = null;
-    console.log("[database] disabled; using in-memory inspection store");
+    console.log("[database] disabled; inspection history persistence is off");
     return getDatabaseStatus();
   }
 
@@ -109,7 +109,7 @@ export async function initializeDatabase() {
   } catch (error) {
     databaseReady = false;
     databaseError = error;
-    console.error(`[database] unavailable; using in-memory inspection store. reason=${error.message}`);
+    console.error(`[database] unavailable; inspection history persistence is off. reason=${error.message}`);
   }
 
   return getDatabaseStatus();

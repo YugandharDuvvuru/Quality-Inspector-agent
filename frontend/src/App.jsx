@@ -1,17 +1,20 @@
 import React from "react";
 import {
+  Activity,
   AlertTriangle,
   ClipboardCheck,
+  Database,
   Factory,
   FileJson,
   Gauge,
   History,
   Loader2,
+  Sparkles,
   Send,
   ShieldCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { fetchInspections, submitInspection } from "./api.js";
+import { fetchHealthStatus, fetchInspections, submitInspection } from "./api.js";
 
 const samplePayload = {
   component_id: "CMP-AXLE-1042",
@@ -57,11 +60,14 @@ export function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [runtime, setRuntime] = useState({
+    backend: "Checking",
+    bedrock: "Unknown",
+    database: "Unknown",
+  });
 
   useEffect(() => {
-    fetchInspections()
-      .then(setHistory)
-      .catch(() => setHistory([]));
+    loadDashboardData();
   }, []);
 
   const verdictTone = useMemo(() => {
@@ -98,6 +104,38 @@ export function App() {
     setResult(null);
     setError("");
     setFileInputKey((current) => current + 1);
+  }
+
+  async function loadDashboardData() {
+    try {
+      const [inspections, health] = await Promise.all([
+        fetchInspections().catch(() => []),
+        fetchHealthStatus().catch(() => null),
+      ]);
+
+      setHistory(inspections);
+
+      if (health) {
+        setRuntime({
+          backend: health.status === "ok" ? "Connected" : "Issue",
+          bedrock: health.bedrockEnabled ? "Enabled" : "Disabled",
+          database: health.database?.ready ? "Connected" : "Unavailable",
+        });
+      } else {
+        setRuntime({
+          backend: "Unavailable",
+          bedrock: "Unknown",
+          database: "Unknown",
+        });
+      }
+    } catch {
+      setHistory([]);
+      setRuntime({
+        backend: "Unavailable",
+        bedrock: "Unknown",
+        database: "Unknown",
+      });
+    }
   }
 
   async function handleImageUpload(event) {
@@ -168,10 +206,17 @@ export function App() {
 
       const inspection = await submitInspection(payload);
       setResult(inspection);
-      setHistory((current) => [
-        inspection,
-        ...current.filter((item) => item.component_id !== inspection.component_id),
-      ]);
+      const updatedHistory = await fetchInspections();
+      setHistory(updatedHistory);
+      const health = await fetchHealthStatus().catch(() => null);
+
+      if (health) {
+        setRuntime({
+          backend: health.status === "ok" ? "Connected" : "Issue",
+          bedrock: health.bedrockEnabled ? "Enabled" : "Disabled",
+          database: health.database?.ready ? "Connected" : "Unavailable",
+        });
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -191,6 +236,12 @@ export function App() {
           <StatusPill icon={ShieldCheck} label="IATF 16949" />
           <StatusPill icon={ClipboardCheck} label="ISO 9001" />
         </div>
+      </section>
+
+      <section className="runtime-strip">
+        <StatusPill icon={Activity} label={`Backend ${runtime.backend}`} />
+        <StatusPill icon={Sparkles} label={`Bedrock ${runtime.bedrock}`} />
+        <StatusPill icon={Database} label={`Database ${runtime.database}`} />
       </section>
 
       <section className="workspace-grid">
@@ -248,7 +299,10 @@ export function App() {
                 <p className="eyebrow">Final Decision</p>
                 <h2>{result?.final_decision?.final_decision || "Awaiting inspection"}</h2>
               </div>
-              <Gauge size={24} />
+              <div className="decision-badges">
+                <SourceBadge source={result?.source} />
+                <Gauge size={24} />
+              </div>
             </div>
 
             <div className="metric-grid">
@@ -262,6 +316,9 @@ export function App() {
               {result?.final_decision?.justification ||
                 "Submit an inspection request to run the agentic quality workflow."}
             </p>
+            {result?.fallback_reason ? (
+              <p className="fallback-note">Fallback reason: {result.fallback_reason}</p>
+            ) : null}
           </div>
 
           <div className="panel">
@@ -280,7 +337,7 @@ export function App() {
       <section className="panel history-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Shared Memory</p>
+            <p className="eyebrow">Postgres History</p>
             <h2>Inspection history</h2>
           </div>
           <History size={22} />
@@ -293,13 +350,17 @@ export function App() {
                 key={`${item.component_id}-${item.created_at}`}
                 onClick={() => setResult(item)}
               >
-                <span>{item.component_id}</span>
+                <div className="history-item-top">
+                  <span>{item.component_id}</span>
+                  <SourceBadge source={item.source} compact />
+                </div>
                 <strong>{item.final_decision?.final_decision || "PENDING"}</strong>
+                <span>{item.severity_assessment?.severity || "No severity"}</span>
                 <small>{item.created_at ? new Date(item.created_at).toLocaleString() : ""}</small>
               </button>
             ))
           ) : (
-            <p className="muted">No inspections recorded yet.</p>
+            <p className="muted">No persisted inspections recorded yet.</p>
           )}
         </div>
       </section>
@@ -343,6 +404,21 @@ function Metric({ label, value }) {
   );
 }
 
+function SourceBadge({ source, compact = false }) {
+  if (!source) {
+    return <span className={`source-badge neutral ${compact ? "compact" : ""}`}>Unknown</span>;
+  }
+
+  const isBedrock = source === "aws-bedrock";
+  const label = isBedrock ? "AWS Bedrock" : "Local Fallback";
+
+  return (
+    <span className={`source-badge ${isBedrock ? "bedrock" : "fallback"} ${compact ? "compact" : ""}`}>
+      {label}
+    </span>
+  );
+}
+
 function EmptyState() {
   return (
     <div className="empty-state">
@@ -371,6 +447,24 @@ function ResultView({ result }) {
         ) : (
           <p className="muted">No defects detected.</p>
         )}
+        <p className="agent-summary">{result.inspection_summary?.reasoning}</p>
+      </section>
+
+      <section>
+        <h3>Severity Classifier Agent</h3>
+        <div className="agent-grid">
+          <Metric label="Severity" value={result.severity_assessment?.severity || "-"} />
+          <Metric label="Verdict" value={result.severity_assessment?.verdict || "-"} />
+          <Metric
+            label="Confidence"
+            value={
+              result.severity_assessment?.confidence
+                ? `${Math.round(result.severity_assessment.confidence * 100)}%`
+                : "-"
+            }
+          />
+        </div>
+        <p className="agent-summary">{result.severity_assessment?.standard_reference}</p>
       </section>
 
       <section>
@@ -388,6 +482,20 @@ function ResultView({ result }) {
       </section>
 
       <section>
+        <h3>Decision & Action Agent</h3>
+        <div className="agent-grid">
+          <Metric label="Disposition" value={result.final_decision?.final_decision || "-"} />
+          <Metric label="Line Action" value={result.final_decision?.line_action || "-"} />
+          <Metric label="Batch Action" value={result.final_decision?.batch_action || "-"} />
+          <Metric
+            label="Human Override"
+            value={result.final_decision?.human_override_required ? "Required" : "Not Required"}
+          />
+        </div>
+        <p className="agent-summary">{result.final_decision?.justification}</p>
+      </section>
+
+      <section>
         <h3>Escalation & Notify Agent</h3>
         <p>{result.notifications?.ncr_report}</p>
         <div className="tag-row">
@@ -397,6 +505,7 @@ function ResultView({ result }) {
             </span>
           ))}
         </div>
+        <p className="agent-summary">{result.notifications?.copq_estimate}</p>
       </section>
 
       <details>

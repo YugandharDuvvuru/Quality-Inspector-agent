@@ -38,7 +38,7 @@ export async function getLatestInspectionByComponentIdFromDatabase(componentId) 
   return result.rows[0]?.raw_response || null;
 }
 
-export async function saveInspectionToDatabase({ input, result }) {
+export async function saveInspectionToDatabase({ input, result, workflowMetadata = {} }) {
   return withTransaction(async (client) => {
     const componentId = await upsertComponent(client, input);
     const inspectionRequestId = await insertInspectionRequest(client, componentId, input);
@@ -49,6 +49,16 @@ export async function saveInspectionToDatabase({ input, result }) {
     await insertNotifications(client, inspectionResultId, input, result);
     await insertNcrReport(client, inspectionResultId, result);
     await insertAuditLog(client, inspectionResultId, input, result);
+    await insertBedrockInteractionRecords(
+      client,
+      inspectionResultId,
+      workflowMetadata.bedrockInteractions || []
+    );
+    await insertEnterpriseIntegrationSubmissions(
+      client,
+      inspectionResultId,
+      workflowMetadata.enterpriseIntegrations || []
+    );
 
     return result;
   });
@@ -266,6 +276,68 @@ async function insertAuditLog(client, inspectionResultId, input, result) {
       }),
     ]
   );
+}
+
+async function insertBedrockInteractionRecords(client, inspectionResultId, interactions) {
+  for (const interaction of interactions) {
+    await client.query(
+      `
+        INSERT INTO bedrock_interaction_records (
+          inspection_result_id,
+          stage_name,
+          model_id,
+          region,
+          prompt_text,
+          response_text,
+          success,
+          skipped,
+          error_summary
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `,
+      [
+        inspectionResultId,
+        interaction.stage_name,
+        valueOrNull(interaction.model_id),
+        valueOrNull(interaction.region),
+        valueOrNull(interaction.prompt_text),
+        valueOrNull(interaction.response_text),
+        Boolean(interaction.success),
+        Boolean(interaction.skipped),
+        valueOrNull(interaction.error_summary),
+      ]
+    );
+  }
+}
+
+async function insertEnterpriseIntegrationSubmissions(client, inspectionResultId, submissions) {
+  for (const submission of submissions) {
+    await client.query(
+      `
+        INSERT INTO enterprise_integration_submissions (
+          inspection_result_id,
+          system_name,
+          submission_status,
+          skipped_flag,
+          external_reference,
+          request_payload,
+          response_payload,
+          error_detail
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
+      `,
+      [
+        inspectionResultId,
+        submission.system_name,
+        submission.submission_status,
+        Boolean(submission.skipped_flag),
+        valueOrNull(submission.external_reference),
+        JSON.stringify(submission.request_payload || {}),
+        JSON.stringify(submission.response_payload || {}),
+        valueOrNull(submission.error_detail),
+      ]
+    );
+  }
 }
 
 function extractNcrNumber(reportText) {

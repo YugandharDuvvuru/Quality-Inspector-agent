@@ -1,56 +1,48 @@
-import { runDecisionActionAgent } from "../agents/decisionActionAgent.js";
-import { runEscalationNotifyAgent } from "../agents/escalationNotifyAgent.js";
-import { runRootCauseAnalystAgent } from "../agents/rootCauseAnalystAgent.js";
-import { runSeverityClassifierAgent } from "../agents/severityClassifierAgent.js";
-import { runVisionInspectorAgent } from "../agents/visionInspectorAgent.js";
 import { env } from "../config/env.js";
 import { isDatabaseReady } from "../db/connection.js";
-import { buildQualityInspectionPrompt } from "../prompts/qualityInspectionPrompt.js";
 import {
   getLatestInspectionByComponentIdFromDatabase,
   listLatestInspectionsFromDatabase,
   saveInspectionToDatabase,
 } from "../repositories/inspectionRepository.js";
-import { validateInspectionResult } from "../schemas/inspectionResultSchema.js";
-import { extractJsonObject, invokeQualityInspectionModel } from "./bedrockClient.js";
+import {
+  executeEnterpriseIntegrations,
+  getEnterpriseIntegrationStatus,
+} from "./enterpriseIntegrationService.js";
+import { runQualityInspectionWorkflow } from "./qualityWorkflowGraph.js";
 
-const inspectionMemory = new Map();
 const CONFIDENCE_THRESHOLD = 0.75;
 
 export async function listInspections() {
-  if (isDatabaseReady()) {
-    try {
-      const inspections = await listLatestInspectionsFromDatabase();
-
-      if (inspections.length || inspectionMemory.size === 0) {
-        return inspections;
-      }
-    } catch (error) {
-      console.error(`[database] failed to list inspections. reason=${error.message}`);
-    }
+  if (!isDatabaseReady()) {
+    console.warn("[database] inspection history requested while Postgres is not ready");
+    return [];
   }
 
-  return Array.from(inspectionMemory.values()).sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
+  try {
+    return await listLatestInspectionsFromDatabase();
+  } catch (error) {
+    console.error(`[database] failed to list inspections. reason=${error.message}`);
+    return [];
+  }
 }
 
 export async function getInspectionByComponentId(componentId) {
-  if (isDatabaseReady()) {
-    try {
-      const inspection = await getLatestInspectionByComponentIdFromDatabase(componentId);
-
-      if (inspection) {
-        return inspection;
-      }
-    } catch (error) {
-      console.error(
-        `[database] failed to load inspection for component=${componentId}. reason=${error.message}`
-      );
-    }
+  if (!isDatabaseReady()) {
+    console.warn(
+      `[database] inspection lookup requested for component=${componentId} while Postgres is not ready`
+    );
+    return null;
   }
 
-  return inspectionMemory.get(componentId) || null;
+  try {
+    return await getLatestInspectionByComponentIdFromDatabase(componentId);
+  } catch (error) {
+    console.error(
+      `[database] failed to load inspection for component=${componentId}. reason=${error.message}`
+    );
+    return null;
+  }
 }
 
 export async function runInspection(input) {
@@ -60,155 +52,48 @@ export async function runInspection(input) {
     `[inspection] component=${input.component_id} bedrockEnabled=${env.BEDROCK_ENABLED}`
   );
 
-  const result = env.BEDROCK_ENABLED
-    ? await runBedrockInspectionWithFallback(input, previousResult)
-    : runLocalAgentInspection(input, previousResult);
+  const { result, workflowMetadata } = await runQualityInspectionWorkflow({
+    input,
+    previousResult,
+    confidenceThreshold: CONFIDENCE_THRESHOLD,
+    bedrockEnabled: env.BEDROCK_ENABLED,
+  });
+  const enterpriseIntegrations = await executeEnterpriseIntegrations({
+    input,
+    result,
+  });
 
   const storedResult = {
     ...result,
     created_at: new Date().toISOString(),
     agentic_loop: ["PERCEIVE", "PLAN", "ACT", "EVALUATE"],
+    enterprise_integrations: enterpriseIntegrations,
   };
-
-  inspectionMemory.set(input.component_id, storedResult);
 
   if (isDatabaseReady()) {
     try {
-      await saveInspectionToDatabase({ input, result: storedResult });
+      await saveInspectionToDatabase({
+        input,
+        result: storedResult,
+        workflowMetadata: {
+          ...workflowMetadata,
+          enterpriseIntegrations,
+        },
+      });
     } catch (error) {
       console.error(
         `[database] failed to persist inspection for component=${input.component_id}. reason=${error.message}`
       );
     }
+  } else {
+    console.warn(
+      `[database] inspection completed for component=${input.component_id}, but Postgres is not ready so no history was stored`
+    );
   }
 
   return storedResult;
 }
 
-async function runBedrockInspectionWithFallback(input, previousResult) {
-  try {
-    console.log(`[bedrock] attempting request for component=${input.component_id}`);
-    const prompt = buildQualityInspectionPrompt({
-      input,
-      previousResult,
-      confidenceThreshold: CONFIDENCE_THRESHOLD,
-    });
-    const image = await resolveInspectionImage(input);
-    const modelResponse = await invokeQualityInspectionModel({ prompt, image });
-    const validatedResult = validateInspectionResult(extractJsonObject(modelResponse));
-    console.log(`[bedrock] success for component=${input.component_id}`);
-    return normalizeModelResult(validatedResult, input);
-  } catch (error) {
-    const fallbackReason = formatFallbackReason(error);
-    console.error(
-      `[bedrock] failed for component=${input.component_id}; using fallback. reason=${fallbackReason}`
-    );
-    return runLocalAgentInspection(input, previousResult, fallbackReason);
-  }
-}
-
-function runLocalAgentInspection(input, previousResult, fallbackReason) {
-  if (fallbackReason) {
-    console.log(`[fallback] component=${input.component_id} reason=${fallbackReason}`);
-  } else {
-    console.log(`[fallback] component=${input.component_id} local mode active`);
-  }
-
-  const visionResult = runVisionInspectorAgent(input, previousResult);
-  const severityAssessment = runSeverityClassifierAgent(visionResult);
-  const rootCauseAnalysis = runRootCauseAnalystAgent(visionResult, severityAssessment);
-  const decisionResult = runDecisionActionAgent(
-    visionResult,
-    severityAssessment,
-    CONFIDENCE_THRESHOLD
-  );
-  const notifications = runEscalationNotifyAgent(
-    input,
-    decisionResult.final_decision,
-    severityAssessment
-  );
-
-  return {
-    component_id: input.component_id,
-    inspection_summary: visionResult.inspection_summary,
-    severity_assessment: severityAssessment,
-    root_cause_analysis: rootCauseAnalysis,
-    final_decision: decisionResult.final_decision,
-    notifications,
-    confidence_score: decisionResult.confidence_score,
-    source: "local-fallback",
-    fallback_reason: fallbackReason,
-  };
-}
-
-function normalizeModelResult(result, input) {
-  return {
-    component_id: result.component_id || input.component_id,
-    inspection_summary: result.inspection_summary || {},
-    severity_assessment: result.severity_assessment || {},
-    root_cause_analysis: result.root_cause_analysis || {},
-    final_decision: {
-      ...(result.final_decision || {}),
-      human_override_required:
-        result.final_decision?.human_override_required ??
-        Number(result.confidence_score || 0) < CONFIDENCE_THRESHOLD,
-    },
-    notifications: result.notifications || {},
-    confidence_score: Number(result.confidence_score || 0),
-    source: "aws-bedrock",
-  };
-}
-
-async function tryLoadImageFromUrl(imageUrl) {
-  if (!imageUrl || !imageUrl.startsWith("http")) {
-    return null;
-  }
-
-  const response = await fetch(imageUrl);
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const mediaType = response.headers.get("content-type") || "image/jpeg";
-
-  if (!mediaType.startsWith("image/")) {
-    return null;
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return {
-    mediaType,
-    base64: Buffer.from(arrayBuffer).toString("base64"),
-  };
-}
-
-async function resolveInspectionImage(input) {
-  if (input.image_base64 && input.image_media_type?.startsWith("image/")) {
-    return {
-      mediaType: input.image_media_type,
-      base64: stripDataUrlPrefix(input.image_base64),
-    };
-  }
-
-  return tryLoadImageFromUrl(input.image_url);
-}
-
-function stripDataUrlPrefix(value) {
-  const marker = "base64,";
-  const markerIndex = value.indexOf(marker);
-
-  if (markerIndex === -1) {
-    return value;
-  }
-
-  return value.slice(markerIndex + marker.length);
-}
-
-function formatFallbackReason(error) {
-  if (!error.details) {
-    return error.message;
-  }
-
-  return `${error.message}: ${JSON.stringify(error.details)}`;
+export function getIntegrationReadiness() {
+  return getEnterpriseIntegrationStatus();
 }

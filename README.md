@@ -20,10 +20,13 @@ npm run install:all
 2. Configure backend environment:
 
 ```bash
-copy backend\.env.example backend\.env
+copy backend\src\config\.env backend\src\config\.env.local-backup
 ```
 
-Add your AWS values in `backend/.env`.
+Update your local values in `backend/src/config/.env`:
+- AWS Bedrock settings
+- Postgres connection settings
+- optional enterprise integration settings
 
 3. Start backend:
 
@@ -41,4 +44,8 @@ The frontend expects the backend at `http://localhost:4000` unless `VITE_API_BAS
 
 ## AWS Bedrock
 
-Set `BEDROCK_ENABLED=true` in `backend/.env` to call AWS Bedrock. If Bedrock is disabled or unavailable, the backend uses a deterministic local inspection fallback so the application remains usable for demos and development.
+Set `BEDROCK_ENABLED=true` in `backend/src/config/.env` to call AWS Bedrock. If Bedrock is disabled or unavailable, the backend uses a deterministic local inspection fallback so the application remains usable for demos and development.
+
+## Postgres
+
+Set `DATABASE_ENABLED=true` and `DATABASE_URL=postgresql://...` in `backend/src/config/.env` to persist inspection history, Bedrock interaction records, and enterprise integration submission records.
