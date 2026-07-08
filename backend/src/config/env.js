@@ -77,6 +77,47 @@ const enterpriseIntegrationConfigs = [
   buildIntegrationConfig("SUPPLIER_PORTAL", "Supplier Portal", ["supplier portal"]),
 ];
 
+const parseS3Prefix = (value) => {
+  const raw = toText(value);
+
+  if (!raw) {
+    return {
+      uri: "",
+      bucket: "",
+      keyPrefix: "",
+      configured: false,
+    };
+  }
+
+  if (!raw.startsWith("s3://")) {
+    return {
+      uri: raw,
+      bucket: "",
+      keyPrefix: "",
+      configured: false,
+    };
+  }
+
+  const withoutScheme = raw.slice("s3://".length);
+  const firstSlashIndex = withoutScheme.indexOf("/");
+  const bucket =
+    firstSlashIndex === -1 ? withoutScheme : withoutScheme.slice(0, firstSlashIndex);
+  const keyPrefix =
+    firstSlashIndex === -1
+      ? ""
+      : withoutScheme.slice(firstSlashIndex + 1).replace(/^\/+/, "").replace(/\/+$/, "");
+
+  return {
+    uri: raw,
+    bucket,
+    keyPrefix,
+    configured: Boolean(bucket),
+  };
+};
+
+const s3InputPrefix = parseS3Prefix(process.env.QI_S3_INPUT_PREFIX);
+const s3AuditPrefix = parseS3Prefix(process.env.QI_S3_AUDIT_PREFIX);
+
 export const env = {
   ENV_FILE_PATH: envFilePath,
   PORT: Number(process.env.PORT || 4000),
@@ -96,6 +137,10 @@ export const env = {
     8000
   ),
   ENTERPRISE_INTEGRATIONS: enterpriseIntegrationConfigs,
+  QI_S3_REGION: toText(process.env.QI_S3_REGION, process.env.AWS_REGION || "us-east-1"),
+  QI_S3_INPUT_PREFIX: s3InputPrefix,
+  QI_S3_AUDIT_PREFIX: s3AuditPrefix,
+  QI_S3_ENABLED: Boolean(s3InputPrefix.configured || s3AuditPrefix.configured),
   AWS_ACCESS_KEY_ID_PRESENT: Boolean(process.env.AWS_ACCESS_KEY_ID),
   AWS_SECRET_ACCESS_KEY_PRESENT: Boolean(process.env.AWS_SECRET_ACCESS_KEY),
   AWS_SESSION_TOKEN_PRESENT: Boolean(process.env.AWS_SESSION_TOKEN),

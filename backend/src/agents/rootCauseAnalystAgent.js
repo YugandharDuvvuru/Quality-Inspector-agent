@@ -1,3 +1,33 @@
+import { buildRootCauseAnalystPrompt } from "../prompts/qualityInspectionPrompt.js";
+import { validateRootCauseAnalysisStage } from "../schemas/inspectionResultSchema.js";
+import {
+  buildStageStateUpdate,
+  runStageWithBedrock,
+} from "../services/agentStageRuntime.js";
+
+export async function runRootCauseAnalystStage(state) {
+  const prompt = buildRootCauseAnalystPrompt({
+    input: state.input,
+    visionResult: state.visionResult,
+    severityAssessment: state.severityAssessment,
+  });
+
+  const stageResult = await runStageWithBedrock({
+    state,
+    stageName: "root_cause_analyst",
+    prompt,
+    validator: validateRootCauseAnalysisStage,
+    fallbackFactory: () =>
+      runRootCauseAnalystAgent(state.visionResult, state.severityAssessment),
+  });
+
+  return buildStageStateUpdate(state, {
+    rootCauseAnalysis: stageResult.output,
+    interaction: stageResult.interaction,
+    fallbackReason: stageResult.fallbackReason,
+  });
+}
+
 export function runRootCauseAnalystAgent(visionResult, severityAssessment) {
   const { primaryDefect } = visionResult;
 

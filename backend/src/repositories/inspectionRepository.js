@@ -90,12 +90,16 @@ async function insertInspectionRequest(client, componentId, input) {
         inspection_station,
         line_id,
         image_url,
+        image_storage_provider,
+        image_s3_bucket,
+        image_s3_key,
+        image_s3_uri,
         image_file_name,
         image_media_type,
         inspection_timestamp,
         metadata
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
       RETURNING id
     `,
     [
@@ -103,6 +107,10 @@ async function insertInspectionRequest(client, componentId, input) {
       input.inspection_station,
       input.line_id,
       valueOrNull(input.image_url),
+      valueOrNull(input.image_storage_provider),
+      valueOrNull(input.image_s3_bucket),
+      valueOrNull(input.image_s3_key),
+      valueOrNull(input.image_s3_uri),
       valueOrNull(input.image_file_name),
       valueOrNull(input.image_media_type),
       input.timestamp,

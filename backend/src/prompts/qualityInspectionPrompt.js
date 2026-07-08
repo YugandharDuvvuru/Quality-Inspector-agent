@@ -1,85 +1,33 @@
-export function buildQualityInspectionPrompt({ input, previousResult, confidenceThreshold }) {
-  const promptInput = redactImagePayload(input);
+function formatJsonBlock(value) {
+  return JSON.stringify(value, null, 2);
+}
 
+function redactImagePayload(input) {
+  return {
+    ...input,
+    image_base64: input.image_base64 ? "[uploaded image attached to model request]" : "",
+  };
+}
+
+export function buildVisionInspectorPrompt({ input }) {
   return `
-You are an autonomous multi-agent AI system named:
-"Agentic AI Powered Manufacturing Component Quality Inspector".
+You are the Vision Inspector Agent in a manufacturing quality inspection workflow.
 
-MISSION
-Inspect manufacturing components using vision-driven intelligence. Detect and classify defects, determine severity, identify probable root causes, and recommend quality decisions aligned with IATF 16949 and ISO 9001 principles.
-
-GLOBAL RULES
-- Follow this loop: PERCEIVE -> PLAN -> ACT -> EVALUATE -> REFINE.
-- Use only the supplied image and metadata. Do not invent measurements, locations, standards clauses, supplier facts, or production history.
-- Always provide confidence scores from 0 to 1.
-- If confidence is below ${confidenceThreshold}, set "human_override_required" to true.
-- If the image is unclear, missing, inaccessible, or insufficient, say so in "image_quality" and request recapture through the final decision.
-- Keep the output audit-ready, traceable, and suitable for manufacturing quality review.
-- Return only valid JSON. Do not return markdown, comments, or explanatory text outside JSON.
-
-AGENT 1: Vision Inspector Agent
-Role:
-- Analyze the component image and available metadata.
+TASK
+- Analyze the supplied component image and metadata.
 - Detect visible or metadata-supported anomalies such as cracks, corrosion, misalignment, contamination, weld defects, missing features, scratches, dents, or dimensional deviations.
-- For each defect, provide defect type, location, bounding box if visible, and confidence.
-Output responsibility:
-- Fill "inspection_summary.defects_detected".
-- Fill "inspection_summary.image_quality".
-- Fill "inspection_summary.reasoning" with brief evidence from the image or metadata.
+- Do not invent measurements or defect locations that are not supported by the input.
 
-AGENT 2: Severity Classifier Agent
-Role:
-- Evaluate each detected defect using manufacturing quality thinking aligned with IATF 16949 and ISO 9001 control of nonconforming output.
-- Classify severity as CRITICAL, MAJOR, or MINOR.
-- Determine quality verdict as PASS, REWORK, or REJECT.
-Severity guidance:
-- CRITICAL: safety, fit/function failure, fracture, severe crack, leakage risk, or customer-impacting failure risk.
-- MAJOR: nonconformance requiring containment, rework, process correction, supplier action, or additional inspection.
-- MINOR: cosmetic or low-risk issue that does not affect function but needs monitoring or correction.
-Output responsibility:
-- Fill "severity_assessment" with severity, standard reference, verdict, and confidence.
-
-AGENT 3: Root Cause Analyst Agent
-Role:
-- Identify probable manufacturing causes only from available evidence.
-- Consider machine calibration, tooling wear, material defect, operator error, storage/handling, supplier issue, welding/process parameter drift, and process variation.
-- Predict recurrence risk as LOW, MEDIUM, or HIGH.
-- Recommend corrective actions with owner and timeline.
-Output responsibility:
-- Fill "root_cause_analysis".
-
-AGENT 4: Decision & Action Agent
-Role:
-- Consolidate the outputs of the previous agents.
-- Decide final part disposition, line action, and batch action.
-- Ensure decision logic is conservative for safety-critical or low-confidence inspections.
-Decision guidance:
-- PASS: no defect or acceptable low-risk condition.
-- REWORK: defect can likely be corrected before release.
-- REJECT: critical defect, safety/functional risk, or unacceptable nonconformance.
-- Line action must be Continue, Pause, or Stop.
-- Batch action must be Release, Monitor, Quarantine sample, Hold, or equivalent manufacturing action.
-Output responsibility:
-- Fill "final_decision".
-
-AGENT 5: Escalation & Notify Agent
-Role:
-- Generate an NCR summary when the verdict is REJECT, severity is CRITICAL, or containment is required.
-- Identify stakeholder notifications such as Quality Engineer, Line Supervisor, Supplier Portal, MES, ERP, or ServiceNow.
-- Estimate Cost of Poor Quality qualitatively when exact cost data is unavailable.
-- Create an audit log message with component, line, station, and timestamp.
-Output responsibility:
-- Fill "notifications".
+RULES
+- Return only valid JSON.
+- Confidence values must be between 0 and 1.
+- If image evidence is unclear or unavailable, state that in image_quality and reasoning.
 
 INPUT
-${JSON.stringify(promptInput, null, 2)}
+${formatJsonBlock(redactImagePayload(input))}
 
-SHARED MEMORY FOR THIS COMPONENT
-${JSON.stringify(previousResult || null, null, 2)}
-
-FINAL JSON SCHEMA
+RETURN JSON WITH THIS EXACT SHAPE
 {
-  "component_id": "",
   "inspection_summary": {
     "defects_detected": [
       {
@@ -91,13 +39,67 @@ FINAL JSON SCHEMA
     ],
     "image_quality": "",
     "reasoning": ""
-  },
+  }
+}
+`;
+}
+
+export function buildSeverityClassifierPrompt({ input, visionResult }) {
+  return `
+You are the Severity Classifier Agent in a manufacturing quality inspection workflow.
+
+TASK
+- Evaluate defect criticality using the inspection summary from the vision stage.
+- Classify severity as CRITICAL, MAJOR, or MINOR.
+- Issue a verdict as PASS, REWORK, or REJECT.
+
+RULES
+- Align reasoning to manufacturing quality control principles such as IATF 16949 and ISO 9001 control of nonconforming output.
+- Return only valid JSON.
+- Confidence values must be between 0 and 1.
+
+COMPONENT INPUT
+${formatJsonBlock(redactImagePayload(input))}
+
+VISION OUTPUT
+${formatJsonBlock(visionResult?.inspection_summary || null)}
+
+RETURN JSON WITH THIS EXACT SHAPE
+{
   "severity_assessment": {
     "severity": "",
     "standard_reference": "",
     "verdict": "",
     "confidence": 0
-  },
+  }
+}
+`;
+}
+
+export function buildRootCauseAnalystPrompt({ input, visionResult, severityAssessment }) {
+  return `
+You are the Root Cause Analyst Agent in a manufacturing quality inspection workflow.
+
+TASK
+- Infer the most probable manufacturing cause using the vision and severity outputs.
+- Assess recurrence risk as LOW, MEDIUM, or HIGH.
+- Recommend corrective actions with owner and timeline.
+
+RULES
+- Use only the supplied evidence.
+- Return only valid JSON.
+
+COMPONENT INPUT
+${formatJsonBlock(redactImagePayload(input))}
+
+VISION OUTPUT
+${formatJsonBlock(visionResult?.inspection_summary || null)}
+
+SEVERITY OUTPUT
+${formatJsonBlock(severityAssessment || null)}
+
+RETURN JSON WITH THIS EXACT SHAPE
+{
   "root_cause_analysis": {
     "root_cause": "",
     "recurrence_risk": "",
@@ -108,7 +110,45 @@ FINAL JSON SCHEMA
         "timeline": ""
       }
     ]
-  },
+  }
+}
+`;
+}
+
+export function buildDecisionActionPrompt({
+  input,
+  visionResult,
+  severityAssessment,
+  rootCauseAnalysis,
+  confidenceThreshold,
+}) {
+  return `
+You are the Decision & Action Agent in a manufacturing quality inspection workflow.
+
+TASK
+- Consolidate prior agent outputs.
+- Decide final part disposition, line action, and batch action.
+- Set human_override_required to true when confidence is below ${confidenceThreshold}.
+
+RULES
+- Final decision must be PASS, REWORK, or REJECT.
+- Return only valid JSON.
+- confidence_score must be between 0 and 1.
+
+COMPONENT INPUT
+${formatJsonBlock(redactImagePayload(input))}
+
+VISION OUTPUT
+${formatJsonBlock(visionResult?.inspection_summary || null)}
+
+SEVERITY OUTPUT
+${formatJsonBlock(severityAssessment || null)}
+
+ROOT CAUSE OUTPUT
+${formatJsonBlock(rootCauseAnalysis || null)}
+
+RETURN JSON WITH THIS EXACT SHAPE
+{
   "final_decision": {
     "final_decision": "",
     "line_action": "",
@@ -116,20 +156,49 @@ FINAL JSON SCHEMA
     "human_override_required": false,
     "justification": ""
   },
-  "notifications": {
-    "ncr_report": "",
-    "notifications_sent": [],
-    "copq_estimate": "",
-    "audit_log": ""
-  },
   "confidence_score": 0
 }
 `;
 }
 
-function redactImagePayload(input) {
-  return {
-    ...input,
-    image_base64: input.image_base64 ? "[uploaded image attached to model request]" : "",
-  };
+export function buildEscalationNotifyPrompt({
+  input,
+  severityAssessment,
+  rootCauseAnalysis,
+  decisionResult,
+}) {
+  return `
+You are the Escalation & Notify Agent in a manufacturing quality inspection workflow.
+
+TASK
+- Generate an NCR summary when the verdict is REJECT, severity is CRITICAL, or containment is required.
+- Identify stakeholder notifications such as Quality Engineer, Line Supervisor, Supplier Portal, MES, ERP, or ServiceNow.
+- Estimate Cost of Poor Quality qualitatively when exact cost data is unavailable.
+- Create an audit log message with component, line, station, and timestamp.
+
+RULES
+- Return only valid JSON.
+
+COMPONENT INPUT
+${formatJsonBlock(redactImagePayload(input))}
+
+SEVERITY OUTPUT
+${formatJsonBlock(severityAssessment || null)}
+
+ROOT CAUSE OUTPUT
+${formatJsonBlock(rootCauseAnalysis || null)}
+
+DECISION OUTPUT
+${formatJsonBlock(decisionResult || null)}
+
+RETURN JSON WITH THIS EXACT SHAPE
+{
+  "notifications": {
+    "ncr_report": "",
+    "notifications_sent": [],
+    "copq_estimate": "",
+    "audit_log": ""
+  }
+}
+`;
 }

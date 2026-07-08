@@ -1,4 +1,34 @@
-export function runVisionInspectorAgent(input, previousResult) {
+import { buildVisionInspectorPrompt } from "../prompts/qualityInspectionPrompt.js";
+import { validateInspectionSummaryStage } from "../schemas/inspectionResultSchema.js";
+import {
+  buildStageStateUpdate,
+  resolveInspectionImage,
+  runStageWithBedrock,
+} from "../services/agentStageRuntime.js";
+
+export async function runVisionInspectorStage(state) {
+  const prompt = buildVisionInspectorPrompt({
+    input: state.input,
+  });
+
+  const stageResult = await runStageWithBedrock({
+    state,
+    stageName: "vision_inspector",
+    prompt,
+    imageResolver: () => resolveInspectionImage(state.input),
+    validator: validateInspectionSummaryStage,
+    normalizeOutput: normalizeVisionStageOutput,
+    fallbackFactory: () => runVisionInspectorAgent(state.input),
+  });
+
+  return buildStageStateUpdate(state, {
+    visionResult: stageResult.output,
+    interaction: stageResult.interaction,
+    fallbackReason: stageResult.fallbackReason,
+  });
+}
+
+export function runVisionInspectorAgent(input) {
   const signal = [
     input.image_url,
     input.image_file_name,
@@ -6,7 +36,6 @@ export function runVisionInspectorAgent(input, previousResult) {
     input.metadata?.notes,
     input.metadata?.material,
     input.metadata?.dimensions,
-    previousResult?.inspection_summary?.reasoning,
   ]
     .filter(Boolean)
     .join(" ")
@@ -33,6 +62,30 @@ export function runVisionInspectorAgent(input, previousResult) {
         ? `Local fallback detected a ${primaryDefect.type} signal from supplied image URL or metadata.`
         : "No defect keywords were detected in the supplied image URL or metadata.",
     },
+  };
+}
+
+function normalizeVisionStageOutput(inspectionSummary) {
+  const primaryDefect = inspectionSummary.defects_detected[0]
+    ? {
+        type: inspectionSummary.defects_detected[0].defect_type,
+        location: inspectionSummary.defects_detected[0].location,
+        confidence: inspectionSummary.defects_detected[0].confidence,
+      }
+    : null;
+
+  const signal = [
+    inspectionSummary.reasoning,
+    ...inspectionSummary.defects_detected.map((defect) => defect.defect_type),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return {
+    signal,
+    primaryDefect,
+    inspection_summary: inspectionSummary,
   };
 }
 

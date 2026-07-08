@@ -10,6 +10,7 @@ import {
   getEnterpriseIntegrationStatus,
 } from "./enterpriseIntegrationService.js";
 import { runQualityInspectionWorkflow } from "./qualityWorkflowGraph.js";
+import { prepareInspectionImageInput } from "./s3ImageService.js";
 
 const CONFIDENCE_THRESHOLD = 0.75;
 
@@ -46,20 +47,19 @@ export async function getInspectionByComponentId(componentId) {
 }
 
 export async function runInspection(input) {
-  const previousResult = await getInspectionByComponentId(input.component_id);
+  const preparedInput = await prepareInspectionImageInput(input);
 
   console.log(
-    `[inspection] component=${input.component_id} bedrockEnabled=${env.BEDROCK_ENABLED}`
+    `[inspection] component=${preparedInput.component_id} bedrockEnabled=${env.BEDROCK_ENABLED}`
   );
 
   const { result, workflowMetadata } = await runQualityInspectionWorkflow({
-    input,
-    previousResult,
+    input: preparedInput,
     confidenceThreshold: CONFIDENCE_THRESHOLD,
     bedrockEnabled: env.BEDROCK_ENABLED,
   });
   const enterpriseIntegrations = await executeEnterpriseIntegrations({
-    input,
+    input: preparedInput,
     result,
   });
 
@@ -73,7 +73,7 @@ export async function runInspection(input) {
   if (isDatabaseReady()) {
     try {
       await saveInspectionToDatabase({
-        input,
+        input: preparedInput,
         result: storedResult,
         workflowMetadata: {
           ...workflowMetadata,
@@ -82,12 +82,12 @@ export async function runInspection(input) {
       });
     } catch (error) {
       console.error(
-        `[database] failed to persist inspection for component=${input.component_id}. reason=${error.message}`
+        `[database] failed to persist inspection for component=${preparedInput.component_id}. reason=${error.message}`
       );
     }
   } else {
     console.warn(
-      `[database] inspection completed for component=${input.component_id}, but Postgres is not ready so no history was stored`
+      `[database] inspection completed for component=${preparedInput.component_id}, but Postgres is not ready so no history was stored`
     );
   }
 

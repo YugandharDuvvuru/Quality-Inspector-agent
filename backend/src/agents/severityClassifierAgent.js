@@ -1,3 +1,31 @@
+import { buildSeverityClassifierPrompt } from "../prompts/qualityInspectionPrompt.js";
+import { validateSeverityAssessmentStage } from "../schemas/inspectionResultSchema.js";
+import {
+  buildStageStateUpdate,
+  runStageWithBedrock,
+} from "../services/agentStageRuntime.js";
+
+export async function runSeverityClassifierStage(state) {
+  const prompt = buildSeverityClassifierPrompt({
+    input: state.input,
+    visionResult: state.visionResult,
+  });
+
+  const stageResult = await runStageWithBedrock({
+    state,
+    stageName: "severity_classifier",
+    prompt,
+    validator: validateSeverityAssessmentStage,
+    fallbackFactory: () => runSeverityClassifierAgent(state.visionResult),
+  });
+
+  return buildStageStateUpdate(state, {
+    severityAssessment: stageResult.output,
+    interaction: stageResult.interaction,
+    fallbackReason: stageResult.fallbackReason,
+  });
+}
+
 export function runSeverityClassifierAgent(visionResult) {
   const { primaryDefect, signal } = visionResult;
 

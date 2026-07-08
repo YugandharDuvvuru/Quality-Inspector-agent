@@ -2,16 +2,20 @@ import React from "react";
 import {
   Activity,
   AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
   ClipboardCheck,
+  Cloud,
   Database,
   Factory,
   FileJson,
   Gauge,
   History,
+  Image as ImageIcon,
+  Link2,
   Loader2,
-  Sparkles,
-  Send,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { fetchHealthStatus, fetchInspections, submitInspection } from "./api.js";
@@ -47,6 +51,15 @@ const blankForm = {
   notes: "",
 };
 
+const workflowDefinitions = [
+  { key: "vision", index: "01", title: "Vision Inspector" },
+  { key: "severity", index: "02", title: "Severity Classifier" },
+  { key: "rootCause", index: "03", title: "Root Cause Analyst" },
+  { key: "decision", index: "04", title: "Decision and Action" },
+  { key: "notify", index: "05", title: "Escalation and Notify" },
+  { key: "integration", index: "06", title: "Enterprise Integration" },
+];
+
 export function App() {
   const [form, setForm] = useState(() => ({
     component_id: samplePayload.component_id,
@@ -70,14 +83,12 @@ export function App() {
     loadDashboardData();
   }, []);
 
-  const verdictTone = useMemo(() => {
-    const verdict = result?.final_decision?.final_decision;
-
-    if (verdict === "REJECT") return "danger";
-    if (verdict === "REWORK") return "warning";
-    if (verdict === "PASS") return "success";
-    return "neutral";
-  }, [result]);
+  const verdictTone = useMemo(() => getVerdictTone(result?.final_decision?.final_decision), [result]);
+  const workflowSteps = useMemo(() => buildWorkflowSteps(result), [result]);
+  const findings = result?.inspection_summary?.defects_detected || [];
+  const actions = result?.root_cause_analysis?.recommended_actions || [];
+  const notifications = result?.notifications?.notifications_sent || [];
+  const integrations = result?.enterprise_integrations || [];
 
   function updateField(event) {
     const { name, value } = event.target;
@@ -114,27 +125,10 @@ export function App() {
       ]);
 
       setHistory(inspections);
-
-      if (health) {
-        setRuntime({
-          backend: health.status === "ok" ? "Connected" : "Issue",
-          bedrock: health.bedrockEnabled ? "Enabled" : "Disabled",
-          database: health.database?.ready ? "Connected" : "Unavailable",
-        });
-      } else {
-        setRuntime({
-          backend: "Unavailable",
-          bedrock: "Unknown",
-          database: "Unknown",
-        });
-      }
+      setRuntime(readRuntimeState(health));
     } catch {
       setHistory([]);
-      setRuntime({
-        backend: "Unavailable",
-        bedrock: "Unknown",
-        database: "Unknown",
-      });
+      setRuntime(readRuntimeState(null));
     }
   }
 
@@ -206,17 +200,12 @@ export function App() {
 
       const inspection = await submitInspection(payload);
       setResult(inspection);
-      const updatedHistory = await fetchInspections();
+      const [updatedHistory, health] = await Promise.all([
+        fetchInspections().catch(() => []),
+        fetchHealthStatus().catch(() => null),
+      ]);
       setHistory(updatedHistory);
-      const health = await fetchHealthStatus().catch(() => null);
-
-      if (health) {
-        setRuntime({
-          backend: health.status === "ok" ? "Connected" : "Issue",
-          bedrock: health.bedrockEnabled ? "Enabled" : "Disabled",
-          database: health.database?.ready ? "Connected" : "Unavailable",
-        });
-      }
+      setRuntime(readRuntimeState(health));
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -225,142 +214,365 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
-      <section className="top-bar">
-        <div>
-          <p className="eyebrow">Agentic Manufacturing Quality</p>
-          <h1>Component Quality Inspector</h1>
+    <main className="dashboard-shell">
+      <section className="hero-band">
+        <div className="hero-copy">
+          <p className="hero-kicker">Agentic AI Quality Demo</p>
+          <h1>Manufacturing Component Quality Inspector</h1>
+          <p className="hero-text">
+            A unified view of inspection outcomes, quality risk, corrective action, escalation, and
+            enterprise traceability.
+          </p>
         </div>
-        <div className="status-strip">
-          <StatusPill icon={Factory} label="5 Agents" />
-          <StatusPill icon={ShieldCheck} label="IATF 16949" />
-          <StatusPill icon={ClipboardCheck} label="ISO 9001" />
+        <div className="hero-status">
+          <StatusChip icon={Factory} label="5 Agents" />
+          <StatusChip icon={ShieldCheck} label="IATF 16949" />
+          <StatusChip icon={ClipboardCheck} label="ISO 9001" />
         </div>
       </section>
 
-      <section className="runtime-strip">
-        <StatusPill icon={Activity} label={`Backend ${runtime.backend}`} />
-        <StatusPill icon={Sparkles} label={`Bedrock ${runtime.bedrock}`} />
-        <StatusPill icon={Database} label={`Database ${runtime.database}`} />
+      <section className="runtime-row">
+        <RuntimePill icon={Activity} label="Backend" value={runtime.backend} />
+        <RuntimePill icon={Sparkles} label="Bedrock" value={runtime.bedrock} />
+        <RuntimePill icon={Database} label="Database" value={runtime.database} />
       </section>
 
-      <section className="workspace-grid">
-        <form className="panel form-panel" onSubmit={handleSubmit}>
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Inspection Input</p>
-              <h2>Component details</h2>
-            </div>
-            <button className="icon-button" type="submit" disabled={isLoading} title="Run inspection">
-              {isLoading ? <Loader2 className="spin" size={19} /> : <Send size={19} />}
-            </button>
+      <section className="dashboard-grid">
+        <form className="request-panel" onSubmit={handleSubmit}>
+          <div className="panel-title-block">
+            <h2>Inspection Request</h2>
+            <p>Submit a new component image, URL, or S3 URI for multi-agent review.</p>
           </div>
 
-          <div className="field-grid">
+          <div className="request-fields">
             <Input label="Component ID" name="component_id" value={form.component_id} onChange={updateField} required />
-            <Input label="Inspection Station" name="inspection_station" value={form.inspection_station} onChange={updateField} required />
-            <Input label="Line ID" name="line_id" value={form.line_id} onChange={updateField} required />
-            <label className="field field-full upload-field">
-              <span>Upload Component Image</span>
+            <Input
+              label="Inspection Station"
+              name="inspection_station"
+              value={form.inspection_station}
+              onChange={updateField}
+              required
+            />
+            <Input label="Line" name="line_id" value={form.line_id} onChange={updateField} required />
+            <Input label="Timestamp" value={new Date().toISOString()} readOnly />
+            <label className="field field-full">
+              <span>Image Path, URL, or S3 URI</span>
+              <textarea
+                name="image_url"
+                rows="3"
+                value={form.image_url}
+                onChange={updateField}
+                placeholder="https://... or s3://bucket/path"
+              />
+            </label>
+            <label className="field field-full">
+              <span>Local Image File</span>
               <input key={fileInputKey} type="file" accept="image/*" onChange={handleImageUpload} />
               {form.image_file_name ? <small>{form.image_file_name}</small> : null}
             </label>
-            <Input label="Image URL" name="image_url" value={form.image_url} onChange={updateField} full />
             <Input label="Material" name="material" value={form.material} onChange={updateField} />
             <Input label="Supplier" name="supplier" value={form.supplier} onChange={updateField} />
-            <Input label="Batch Number" name="batch_number" value={form.batch_number} onChange={updateField} />
+            <Input label="Batch" name="batch_number" value={form.batch_number} onChange={updateField} />
             <Input label="Dimensions" name="dimensions" value={form.dimensions} onChange={updateField} />
-            <Input label="Tolerance Range" name="tolerance_range" value={form.tolerance_range} onChange={updateField} />
+            <Input label="Tolerance" name="tolerance_range" value={form.tolerance_range} onChange={updateField} />
             <label className="field field-full">
               <span>Inspection Notes</span>
-              <textarea name="notes" rows="4" value={form.notes} onChange={updateField} />
+              <textarea name="notes" rows="5" value={form.notes} onChange={updateField} />
             </label>
           </div>
 
-          {error ? <p className="error-message">{error}</p> : null}
+          <div className="input-evidence">
+            <EvidencePill icon={Link2} label={form.image_url ? "Source URL or S3 URI ready" : "No URL provided"} />
+            <EvidencePill
+              icon={ImageIcon}
+              label={form.image_file_name ? `${form.image_file_name}` : "No local file selected"}
+            />
+          </div>
 
-          <div className="button-row">
-            <button className="primary-button" type="submit" disabled={isLoading}>
-              {isLoading ? "Inspecting..." : "Run Inspection"}
+          {error ? <p className="error-banner">{error}</p> : null}
+
+          <div className="request-actions">
+            <button className="primary-action" type="submit" disabled={isLoading}>
+              {isLoading ? <Loader2 className="spin" size={18} /> : null}
+              {isLoading ? "Running Inspection" : "Run Inspection"}
             </button>
-            <button className="secondary-button" type="button" onClick={loadSample}>
+            <button className="secondary-action" type="button" disabled={isLoading}>
+              Stop Inspection
+            </button>
+            <button className="secondary-action" type="button" onClick={loadSample}>
               Load Sample
             </button>
-            <button className="secondary-button" type="button" onClick={clearForm}>
+            <button className="ghost-action" type="button" onClick={clearForm}>
               Clear
             </button>
           </div>
         </form>
 
-        <section className="result-stack">
-          <div className={`panel decision-panel ${verdictTone}`}>
-            <div className="panel-heading">
+        <section className="results-area">
+          <div className="summary-grid">
+            <SummaryCard
+              label="Workflow"
+              value={getWorkflowHeadline(result)}
+              tone={result?.final_decision?.human_override_required ? "warning" : "neutral"}
+            />
+            <SummaryCard
+              label="Final Decision"
+              value={result?.final_decision?.final_decision || "Awaiting input"}
+              tone={verdictTone}
+            />
+            <SummaryCard
+              label="Severity"
+              value={result?.severity_assessment?.severity || "-"}
+              tone={verdictTone}
+            />
+            <SummaryCard
+              label="Confidence"
+              value={formatPercent(result?.confidence_score)}
+              tone="neutral"
+            />
+            <SummaryCard label="Defects" value={String(findings.length)} tone={findings.length ? "danger" : "success"} />
+          </div>
+
+          <section className="content-panel">
+            <div className="section-heading">
               <div>
-                <p className="eyebrow">Final Decision</p>
-                <h2>{result?.final_decision?.final_decision || "Awaiting inspection"}</h2>
+                <p className="section-kicker">Workflow</p>
+                <h3>Agent Workflow</h3>
               </div>
-              <div className="decision-badges">
-                <SourceBadge source={result?.source} />
-                <Gauge size={24} />
+              <SourceBadge source={result?.source} />
+            </div>
+            <div className="workflow-grid">
+              {workflowSteps.map((step) => (
+                <WorkflowCard key={step.index} step={step} />
+              ))}
+            </div>
+          </section>
+
+          <div className="details-grid">
+            <section className="content-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="section-kicker">Vision Inspector</p>
+                  <h3>Vision Findings</h3>
+                </div>
+                {findings.length ? <StatusTag tone="success">Clear</StatusTag> : null}
+              </div>
+
+              {findings.length ? (
+                <div className="finding-list">
+                  {findings.map((defect) => (
+                    <div className="finding-card" key={`${defect.defect_type}-${defect.location}`}>
+                      <div>
+                        <strong>{toTitle(defect.defect_type)}</strong>
+                        <p>{toTitle(defect.location)}</p>
+                      </div>
+                      <span>{formatPercent(defect.confidence)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="body-copy muted-copy">No defects detected from the latest inspection result.</p>
+              )}
+
+              <p className="body-copy">
+                {result?.inspection_summary?.reasoning || "Inspection reasoning will appear after the first run."}
+              </p>
+            </section>
+
+            <section className="content-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="section-kicker">Severity Classifier</p>
+                  <h3>Severity Assessment</h3>
+                </div>
+                <StatusTag tone={verdictTone}>{result?.severity_assessment?.verdict || "Pending"}</StatusTag>
+              </div>
+
+              <div className="definition-grid">
+                <DefinitionRow label="Severity" value={result?.severity_assessment?.severity || "-"} />
+                <DefinitionRow
+                  label="Confidence"
+                  value={formatPercent(result?.severity_assessment?.confidence)}
+                />
+                <DefinitionRow
+                  label="Standard"
+                  value={result?.severity_assessment?.standard_reference || "-"}
+                  wide
+                />
+              </div>
+
+              <p className="body-copy">
+                {result?.final_decision?.justification ||
+                  "Disposition rationale will appear once an inspection has completed."}
+              </p>
+            </section>
+
+            <section className="content-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="section-kicker">Root Cause Analyst</p>
+                  <h3>Root Cause and Actions</h3>
+                </div>
+              </div>
+
+              <p className="body-copy">
+                {result?.root_cause_analysis?.root_cause || "Root-cause analysis is not available yet."}
+              </p>
+
+              <div className="action-list">
+                {actions.length ? (
+                  actions.map((action) => (
+                    <div className="action-card" key={`${action.action}-${action.owner}`}>
+                      <div>
+                        <strong>{action.owner}</strong>
+                        <p>{action.action}</p>
+                      </div>
+                      <span>{action.timeline}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted-copy">No corrective actions generated yet.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="content-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="section-kicker">Decision and Action</p>
+                  <h3>Disposition Controls</h3>
+                </div>
+              </div>
+
+              <div className="metric-row">
+                <DetailMetric label="Disposition" value={result?.final_decision?.final_decision || "-"} />
+                <DetailMetric label="Line Action" value={result?.final_decision?.line_action || "-"} />
+                <DetailMetric label="Batch Action" value={result?.final_decision?.batch_action || "-"} />
+                <DetailMetric
+                  label="Human Review"
+                  value={result?.final_decision?.human_override_required ? "Required" : "Not Required"}
+                />
+              </div>
+
+              {result?.fallback_reason ? (
+                <p className="note-copy">Fallback reason: {result.fallback_reason}</p>
+              ) : null}
+            </section>
+          </div>
+
+          <section className="content-panel">
+            <div className="section-heading">
+              <div>
+                <p className="section-kicker">Escalation</p>
+                <h3>Escalation and Notifications</h3>
               </div>
             </div>
 
-            <div className="metric-grid">
-              <Metric label="Severity" value={result?.severity_assessment?.severity || "-"} />
-              <Metric label="Line Action" value={result?.final_decision?.line_action || "-"} />
-              <Metric label="Batch Action" value={result?.final_decision?.batch_action || "-"} />
-              <Metric label="Confidence" value={result ? `${Math.round(result.confidence_score * 100)}%` : "-"} />
-            </div>
-
-            <p className="decision-text">
-              {result?.final_decision?.justification ||
-                "Submit an inspection request to run the agentic quality workflow."}
+            <p className="headline-copy">
+              {result?.notifications?.ncr_report ||
+                "Escalation details will appear after the inspection agents complete."}
             </p>
-            {result?.fallback_reason ? (
-              <p className="fallback-note">Fallback reason: {result.fallback_reason}</p>
-            ) : null}
-          </div>
 
-          <div className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Agent Outputs</p>
-                <h2>Inspection summary</h2>
-              </div>
-              <FileJson size={22} />
+            <div className="notification-chip-row">
+              {notifications.length ? (
+                notifications.map((entry) => (
+                  <span className="notification-chip" key={entry}>
+                    {entry}
+                  </span>
+                ))
+              ) : (
+                <span className="muted-copy">No notification targets recorded.</span>
+              )}
             </div>
-            {result ? <ResultView result={result} /> : <EmptyState />}
-          </div>
+
+            <div className="definition-grid compact-gap">
+              <DefinitionRow
+                label="COPQ Estimate"
+                value={result?.notifications?.copq_estimate || "Pending"}
+              />
+              <DefinitionRow label="Audit Log" value={result?.notifications?.audit_log || "Pending"} wide />
+            </div>
+          </section>
+
+          <section className="content-panel">
+            <div className="section-heading">
+              <div>
+                <p className="section-kicker">Enterprise</p>
+                <h3>Enterprise Submissions</h3>
+              </div>
+              <Cloud size={18} />
+            </div>
+
+            {result?.image_url ? (
+              <p className="body-copy">
+                Canonical image reference: <span className="inline-code">{result.image_url}</span>
+              </p>
+            ) : null}
+
+            <div className="integration-list">
+              {integrations.length ? (
+                integrations.map((integration) => (
+                  <IntegrationCard key={integration.system_name} integration={integration} />
+                ))
+              ) : (
+                <p className="muted-copy">No enterprise submission records available for this inspection.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="content-panel">
+            <div className="section-heading">
+              <div>
+                <p className="section-kicker">Payload</p>
+                <h3>Consolidated JSON</h3>
+              </div>
+              <FileJson size={18} />
+            </div>
+
+            {result ? (
+              <pre className="json-view">{JSON.stringify(result, null, 2)}</pre>
+            ) : (
+              <div className="empty-panel">
+                <AlertTriangle size={18} />
+                <p>The consolidated agent response will appear here after the first inspection.</p>
+              </div>
+            )}
+          </section>
         </section>
       </section>
 
-      <section className="panel history-panel">
-        <div className="panel-heading">
+      <section className="content-panel history-panel">
+        <div className="section-heading">
           <div>
-            <p className="eyebrow">Postgres History</p>
-            <h2>Inspection history</h2>
+            <p className="section-kicker">Postgres History</p>
+            <h3>Inspection History</h3>
           </div>
-          <History size={22} />
+          <History size={18} />
         </div>
-        <div className="history-list">
+
+        <div className="history-grid">
           {history.length ? (
             history.map((item) => (
               <button
-                className="history-item"
+                className="history-card"
                 key={`${item.component_id}-${item.created_at}`}
                 onClick={() => setResult(item)}
+                type="button"
               >
-                <div className="history-item-top">
-                  <span>{item.component_id}</span>
+                <div className="history-topline">
+                  <strong>{item.component_id}</strong>
                   <SourceBadge source={item.source} compact />
                 </div>
-                <strong>{item.final_decision?.final_decision || "PENDING"}</strong>
-                <span>{item.severity_assessment?.severity || "No severity"}</span>
-                <small>{item.created_at ? new Date(item.created_at).toLocaleString() : ""}</small>
+                <div className="history-verdict-row">
+                  <span>{item.final_decision?.final_decision || "PENDING"}</span>
+                  <ChevronRight size={16} />
+                </div>
+                <p>{item.severity_assessment?.severity || "No severity"}</p>
+                <small>{formatDateTime(item.created_at)}</small>
               </button>
             ))
           ) : (
-            <p className="muted">No persisted inspections recorded yet.</p>
+            <p className="muted-copy">No persisted inspections recorded yet.</p>
           )}
         </div>
       </section>
@@ -377,10 +589,116 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function StatusPill({ icon: Icon, label }) {
+function readRuntimeState(health) {
+  if (!health) {
+    return {
+      backend: "Unavailable",
+      bedrock: "Unknown",
+      database: "Unknown",
+    };
+  }
+
+  return {
+    backend: health.status === "ok" ? "Connected" : "Issue",
+    bedrock: health.bedrockEnabled ? "Enabled" : "Disabled",
+    database: health.database?.ready ? "Connected" : "Unavailable",
+  };
+}
+
+function buildWorkflowSteps(result) {
+  if (!result) {
+    return workflowDefinitions.map((step) => ({
+      ...step,
+      status: "Waiting",
+      tone: "idle",
+    }));
+  }
+
+  return workflowDefinitions.map((step) => ({
+    ...step,
+    status: step.key === "integration" ? "Submitted" : "Completed",
+    tone: step.key === "decision" && result.final_decision?.human_override_required ? "warning" : "done",
+  }));
+}
+
+function getWorkflowHeadline(result) {
+  if (!result) {
+    return "Awaiting Request";
+  }
+
+  return result.final_decision?.human_override_required ? "Needs Human Review" : "Completed";
+}
+
+function getVerdictTone(verdict) {
+  if (verdict === "REJECT") return "danger";
+  if (verdict === "REWORK") return "warning";
+  if (verdict === "PASS") return "success";
+  return "neutral";
+}
+
+function formatPercent(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "-";
+  }
+
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "";
+  }
+
+  return new Date(value).toLocaleString();
+}
+
+function toTitle(value) {
+  if (!value) {
+    return "-";
+  }
+
+  return String(value)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getIntegrationTone(status) {
+  if (status === "SUCCESS") return "success";
+  if (status === "FAILED") return "danger";
+  return "warning";
+}
+
+function getIntegrationLabel(status) {
+  if (!status) {
+    return "Attention";
+  }
+
+  return status.replace(/_/g, " ");
+}
+
+function StatusChip({ icon: Icon, label }) {
   return (
-    <span className="status-pill">
+    <span className="status-chip">
       <Icon size={16} />
+      {label}
+    </span>
+  );
+}
+
+function RuntimePill({ icon: Icon, label, value }) {
+  return (
+    <span className="runtime-pill">
+      <Icon size={15} />
+      <strong>{label}</strong>
+      <span>{value}</span>
+    </span>
+  );
+}
+
+function EvidencePill({ icon: Icon, label }) {
+  return (
+    <span className="evidence-pill">
+      <Icon size={15} />
       {label}
     </span>
   );
@@ -395,13 +713,45 @@ function Input({ label, full, ...props }) {
   );
 }
 
-function Metric({ label, value }) {
+function SummaryCard({ label, value, tone = "neutral" }) {
   return (
-    <div className="metric">
+    <div className={`summary-card ${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   );
+}
+
+function WorkflowCard({ step }) {
+  return (
+    <div className={`workflow-card ${step.tone}`}>
+      <span className="workflow-index">{step.index}</span>
+      <strong>{step.title}</strong>
+      <p>{step.status}</p>
+    </div>
+  );
+}
+
+function DefinitionRow({ label, value, wide = false }) {
+  return (
+    <div className={`definition-row ${wide ? "wide" : ""}`}>
+      <span>{label}</span>
+      <p>{value}</p>
+    </div>
+  );
+}
+
+function DetailMetric({ label, value }) {
+  return (
+    <div className="detail-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function StatusTag({ tone = "neutral", children }) {
+  return <span className={`status-tag ${tone}`}>{children}</span>;
 }
 
 function SourceBadge({ source, compact = false }) {
@@ -409,109 +759,31 @@ function SourceBadge({ source, compact = false }) {
     return <span className={`source-badge neutral ${compact ? "compact" : ""}`}>Unknown</span>;
   }
 
-  const isBedrock = source === "aws-bedrock";
-  const label = isBedrock ? "AWS Bedrock" : "Local Fallback";
+  const label =
+    source === "aws-bedrock"
+      ? "AWS Bedrock"
+      : source === "hybrid-fallback"
+        ? "Hybrid Fallback"
+        : "Local Fallback";
 
-  return (
-    <span className={`source-badge ${isBedrock ? "bedrock" : "fallback"} ${compact ? "compact" : ""}`}>
-      {label}
-    </span>
-  );
+  const tone = source === "aws-bedrock" ? "bedrock" : source === "hybrid-fallback" ? "warning" : "fallback";
+
+  return <span className={`source-badge ${tone} ${compact ? "compact" : ""}`}>{label}</span>;
 }
 
-function EmptyState() {
+function IntegrationCard({ integration }) {
   return (
-    <div className="empty-state">
-      <AlertTriangle size={22} />
-      <p>The five-agent loop will appear here after the first inspection.</p>
-    </div>
-  );
-}
-
-function ResultView({ result }) {
-  const defects = result.inspection_summary?.defects_detected || [];
-  const actions = result.root_cause_analysis?.recommended_actions || [];
-
-  return (
-    <div className="result-view">
-      <section>
-        <h3>Vision Inspector Agent</h3>
-        {defects.length ? (
-          defects.map((defect) => (
-            <div className="result-card" key={`${defect.defect_type}-${defect.location}`}>
-              <strong>{defect.defect_type}</strong>
-              <span>{defect.location}</span>
-              <small>{Math.round(defect.confidence * 100)}% confidence</small>
-            </div>
-          ))
-        ) : (
-          <p className="muted">No defects detected.</p>
-        )}
-        <p className="agent-summary">{result.inspection_summary?.reasoning}</p>
-      </section>
-
-      <section>
-        <h3>Severity Classifier Agent</h3>
-        <div className="agent-grid">
-          <Metric label="Severity" value={result.severity_assessment?.severity || "-"} />
-          <Metric label="Verdict" value={result.severity_assessment?.verdict || "-"} />
-          <Metric
-            label="Confidence"
-            value={
-              result.severity_assessment?.confidence
-                ? `${Math.round(result.severity_assessment.confidence * 100)}%`
-                : "-"
-            }
-          />
-        </div>
-        <p className="agent-summary">{result.severity_assessment?.standard_reference}</p>
-      </section>
-
-      <section>
-        <h3>Root Cause Analyst Agent</h3>
-        <p>{result.root_cause_analysis?.root_cause}</p>
-        <div className="action-list">
-          {actions.map((action) => (
-            <div className="action-item" key={`${action.action}-${action.owner}`}>
-              <strong>{action.owner}</strong>
-              <span>{action.action}</span>
-              <small>{action.timeline}</small>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h3>Decision & Action Agent</h3>
-        <div className="agent-grid">
-          <Metric label="Disposition" value={result.final_decision?.final_decision || "-"} />
-          <Metric label="Line Action" value={result.final_decision?.line_action || "-"} />
-          <Metric label="Batch Action" value={result.final_decision?.batch_action || "-"} />
-          <Metric
-            label="Human Override"
-            value={result.final_decision?.human_override_required ? "Required" : "Not Required"}
-          />
-        </div>
-        <p className="agent-summary">{result.final_decision?.justification}</p>
-      </section>
-
-      <section>
-        <h3>Escalation & Notify Agent</h3>
-        <p>{result.notifications?.ncr_report}</p>
-        <div className="tag-row">
-          {(result.notifications?.notifications_sent || []).map((notification) => (
-            <span className="tag" key={notification}>
-              {notification}
-            </span>
-          ))}
-        </div>
-        <p className="agent-summary">{result.notifications?.copq_estimate}</p>
-      </section>
-
-      <details>
-        <summary>Consolidated JSON</summary>
-        <pre>{JSON.stringify(result, null, 2)}</pre>
-      </details>
+    <div className="integration-card">
+      <div>
+        <strong>{integration.system_name}</strong>
+        <p>{integration.external_reference || "No external reference returned"}</p>
+      </div>
+      <div className="integration-status">
+        <StatusTag tone={getIntegrationTone(integration.submission_status)}>
+          {getIntegrationLabel(integration.submission_status)}
+        </StatusTag>
+        <span>{integration.error_detail || "Submission record stored successfully."}</span>
+      </div>
     </div>
   );
 }
