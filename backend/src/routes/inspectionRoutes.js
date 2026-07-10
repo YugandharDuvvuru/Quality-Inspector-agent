@@ -40,7 +40,7 @@ const inspectionSchema = z
 
 inspectionRouter.get("/", async (_req, res, next) => {
   try {
-    res.json({ inspections: await listInspections() });
+    return res.json({ inspections: await listInspections() });
   } catch (error) {
     next(error);
   }

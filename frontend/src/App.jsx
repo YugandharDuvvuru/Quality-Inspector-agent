@@ -1,24 +1,15 @@
 import React from "react";
 import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  ChevronRight,
   ClipboardCheck,
   Cloud,
-  Database,
   Factory,
-  FileJson,
-  Gauge,
-  History,
   Image as ImageIcon,
   Link2,
   Loader2,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { fetchHealthStatus, fetchInspections, submitInspection } from "./api.js";
+import { useMemo, useState } from "react";
+import { submitInspection } from "./api.js";
 
 const samplePayload = {
   component_id: "CMP-AXLE-1042",
@@ -69,21 +60,14 @@ export function App() {
     ...samplePayload.metadata,
   }));
   const [result, setResult] = useState(null);
-  const [history, setHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
-  const [runtime, setRuntime] = useState({
-    backend: "Checking",
-    bedrock: "Unknown",
-    database: "Unknown",
-  });
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  const verdictTone = useMemo(() => getVerdictTone(result?.final_decision?.final_decision), [result]);
+  const verdictTone = useMemo(
+    () => getVerdictTone(result?.final_decision?.final_decision),
+    [result]
+  );
   const workflowSteps = useMemo(() => buildWorkflowSteps(result), [result]);
   const findings = result?.inspection_summary?.defects_detected || [];
   const actions = result?.root_cause_analysis?.recommended_actions || [];
@@ -115,21 +99,6 @@ export function App() {
     setResult(null);
     setError("");
     setFileInputKey((current) => current + 1);
-  }
-
-  async function loadDashboardData() {
-    try {
-      const [inspections, health] = await Promise.all([
-        fetchInspections().catch(() => []),
-        fetchHealthStatus().catch(() => null),
-      ]);
-
-      setHistory(inspections);
-      setRuntime(readRuntimeState(health));
-    } catch {
-      setHistory([]);
-      setRuntime(readRuntimeState(null));
-    }
   }
 
   async function handleImageUpload(event) {
@@ -200,12 +169,6 @@ export function App() {
 
       const inspection = await submitInspection(payload);
       setResult(inspection);
-      const [updatedHistory, health] = await Promise.all([
-        fetchInspections().catch(() => []),
-        fetchHealthStatus().catch(() => null),
-      ]);
-      setHistory(updatedHistory);
-      setRuntime(readRuntimeState(health));
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -229,12 +192,6 @@ export function App() {
           <StatusChip icon={ShieldCheck} label="IATF 16949" />
           <StatusChip icon={ClipboardCheck} label="ISO 9001" />
         </div>
-      </section>
-
-      <section className="runtime-row">
-        <RuntimePill icon={Activity} label="Backend" value={runtime.backend} />
-        <RuntimePill icon={Sparkles} label="Bedrock" value={runtime.bedrock} />
-        <RuntimePill icon={Database} label="Database" value={runtime.database} />
       </section>
 
       <section className="dashboard-grid">
@@ -330,7 +287,11 @@ export function App() {
               value={formatPercent(result?.confidence_score)}
               tone="neutral"
             />
-            <SummaryCard label="Defects" value={String(findings.length)} tone={findings.length ? "danger" : "success"} />
+            <SummaryCard
+              label="Defects"
+              value={String(findings.length)}
+              tone={findings.length ? "danger" : "success"}
+            />
           </div>
 
           <section className="content-panel">
@@ -519,62 +480,7 @@ export function App() {
               )}
             </div>
           </section>
-
-          <section className="content-panel">
-            <div className="section-heading">
-              <div>
-                <p className="section-kicker">Payload</p>
-                <h3>Consolidated JSON</h3>
-              </div>
-              <FileJson size={18} />
-            </div>
-
-            {result ? (
-              <pre className="json-view">{JSON.stringify(result, null, 2)}</pre>
-            ) : (
-              <div className="empty-panel">
-                <AlertTriangle size={18} />
-                <p>The consolidated agent response will appear here after the first inspection.</p>
-              </div>
-            )}
-          </section>
         </section>
-      </section>
-
-      <section className="content-panel history-panel">
-        <div className="section-heading">
-          <div>
-            <p className="section-kicker">Postgres History</p>
-            <h3>Inspection History</h3>
-          </div>
-          <History size={18} />
-        </div>
-
-        <div className="history-grid">
-          {history.length ? (
-            history.map((item) => (
-              <button
-                className="history-card"
-                key={`${item.component_id}-${item.created_at}`}
-                onClick={() => setResult(item)}
-                type="button"
-              >
-                <div className="history-topline">
-                  <strong>{item.component_id}</strong>
-                  <SourceBadge source={item.source} compact />
-                </div>
-                <div className="history-verdict-row">
-                  <span>{item.final_decision?.final_decision || "PENDING"}</span>
-                  <ChevronRight size={16} />
-                </div>
-                <p>{item.severity_assessment?.severity || "No severity"}</p>
-                <small>{formatDateTime(item.created_at)}</small>
-              </button>
-            ))
-          ) : (
-            <p className="muted-copy">No persisted inspections recorded yet.</p>
-          )}
-        </div>
       </section>
     </main>
   );
@@ -589,22 +495,6 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function readRuntimeState(health) {
-  if (!health) {
-    return {
-      backend: "Unavailable",
-      bedrock: "Unknown",
-      database: "Unknown",
-    };
-  }
-
-  return {
-    backend: health.status === "ok" ? "Connected" : "Issue",
-    bedrock: health.bedrockEnabled ? "Enabled" : "Disabled",
-    database: health.database?.ready ? "Connected" : "Unavailable",
-  };
-}
-
 function buildWorkflowSteps(result) {
   if (!result) {
     return workflowDefinitions.map((step) => ({
@@ -617,7 +507,10 @@ function buildWorkflowSteps(result) {
   return workflowDefinitions.map((step) => ({
     ...step,
     status: step.key === "integration" ? "Submitted" : "Completed",
-    tone: step.key === "decision" && result.final_decision?.human_override_required ? "warning" : "done",
+    tone:
+      step.key === "decision" && result.final_decision?.human_override_required
+        ? "warning"
+        : "done",
   }));
 }
 
@@ -642,14 +535,6 @@ function formatPercent(value) {
   }
 
   return `${Math.round(value * 100)}%`;
-}
-
-function formatDateTime(value) {
-  if (!value) {
-    return "";
-  }
-
-  return new Date(value).toLocaleString();
 }
 
 function toTitle(value) {
@@ -681,16 +566,6 @@ function StatusChip({ icon: Icon, label }) {
     <span className="status-chip">
       <Icon size={16} />
       {label}
-    </span>
-  );
-}
-
-function RuntimePill({ icon: Icon, label, value }) {
-  return (
-    <span className="runtime-pill">
-      <Icon size={15} />
-      <strong>{label}</strong>
-      <span>{value}</span>
     </span>
   );
 }
@@ -766,7 +641,12 @@ function SourceBadge({ source, compact = false }) {
         ? "Hybrid Fallback"
         : "Local Fallback";
 
-  const tone = source === "aws-bedrock" ? "bedrock" : source === "hybrid-fallback" ? "warning" : "fallback";
+  const tone =
+    source === "aws-bedrock"
+      ? "bedrock"
+      : source === "hybrid-fallback"
+        ? "warning"
+        : "fallback";
 
   return <span className={`source-badge ${tone} ${compact ? "compact" : ""}`}>{label}</span>;
 }
