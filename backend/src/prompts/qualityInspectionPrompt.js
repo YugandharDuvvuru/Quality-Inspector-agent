@@ -70,7 +70,8 @@ RETURN JSON WITH THIS EXACT SHAPE
     "severity": "",
     "standard_reference": "",
     "verdict": "",
-    "confidence": 0
+    "confidence": 0,
+    "reasoning": ""
   }
 }
 `;
@@ -109,7 +110,8 @@ RETURN JSON WITH THIS EXACT SHAPE
         "owner": "",
         "timeline": ""
       }
-    ]
+    ],
+    "reasoning": ""
   }
 }
 `;
@@ -196,6 +198,7 @@ RETURN JSON WITH THIS EXACT SHAPE
   "notifications": {
     "ncr_report": "",
     "notifications_sent": [],
+    "supplier_updates": [],
     "copq_estimate": "",
     "audit_log": ""
   }

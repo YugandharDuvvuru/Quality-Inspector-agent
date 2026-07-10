@@ -55,12 +55,14 @@ export const severityAssessmentSchema = z.object({
   standard_reference: nonEmptyTextSchema,
   verdict: upperEnum(["PASS", "REWORK", "REJECT"]),
   confidence: confidenceSchema,
+  reasoning: nonEmptyTextSchema,
 });
 
 export const rootCauseAnalysisSchema = z.object({
   root_cause: nonEmptyTextSchema,
   recurrence_risk: upperEnum(["LOW", "MEDIUM", "HIGH"]),
   recommended_actions: z.array(recommendedActionSchema).min(1),
+  reasoning: nonEmptyTextSchema,
 });
 
 export const finalDecisionSchema = z.object({
@@ -74,6 +76,7 @@ export const finalDecisionSchema = z.object({
 export const notificationsSchema = z.object({
   ncr_report: textSchema,
   notifications_sent: z.array(textSchema).default([]),
+  supplier_updates: z.array(textSchema).default([]),
   copq_estimate: textSchema,
   audit_log: nonEmptyTextSchema,
 });

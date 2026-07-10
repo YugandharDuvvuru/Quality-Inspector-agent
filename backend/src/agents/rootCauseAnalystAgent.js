@@ -33,7 +33,7 @@ export function runRootCauseAnalystAgent(visionResult, severityAssessment) {
 
   if (!primaryDefect) {
     return {
-      root_cause: "No defect detected from available data",
+      root_cause: "Root cause analysis not required because no defect was detected",
       recurrence_risk: "LOW",
       recommended_actions: [
         {
@@ -42,6 +42,8 @@ export function runRootCauseAnalystAgent(visionResult, severityAssessment) {
           timeline: "Current shift",
         },
       ],
+      reasoning:
+        "The root cause stage was skipped for defect investigation because the vision stage did not detect a nonconformance.",
     };
   }
 
@@ -71,5 +73,7 @@ export function runRootCauseAnalystAgent(visionResult, severityAssessment) {
         timeline: "24 hours",
       },
     ],
+    reasoning:
+      "The probable cause is inferred from the detected defect type and the assessed severity of the nonconformance.",
   };
 }

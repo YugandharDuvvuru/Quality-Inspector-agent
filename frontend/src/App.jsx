@@ -180,7 +180,7 @@ export function App() {
     <main className="dashboard-shell">
       <section className="hero-band">
         <div className="hero-copy">
-          <p className="hero-kicker">Agentic AI Quality Demo</p>
+          <p className="hero-kicker"> AI Quality Analysis </p>
           <h1>Manufacturing Component Quality Inspector</h1>
           <p className="hero-text">
             A unified view of inspection outcomes, quality risk, corrective action, escalation, and

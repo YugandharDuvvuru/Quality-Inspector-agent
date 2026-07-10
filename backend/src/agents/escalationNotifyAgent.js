@@ -21,7 +21,7 @@ export async function runEscalationNotifyStage(state) {
     fallbackFactory: () =>
       runEscalationNotifyAgent(
         state.input,
-        state.decisionResult.final_decision,
+        state.decisionResult,
         state.severityAssessment
       ),
   });
@@ -33,9 +33,14 @@ export async function runEscalationNotifyStage(state) {
   });
 }
 
-export function runEscalationNotifyAgent(input, finalDecision, severityAssessment) {
+export function runEscalationNotifyAgent(input, decisionResult, severityAssessment) {
+  const finalDecision = decisionResult.final_decision;
   const shouldEscalate =
-    severityAssessment.severity === "CRITICAL" || finalDecision.final_decision === "REJECT";
+    severityAssessment.severity === "CRITICAL" ||
+    finalDecision.final_decision === "REJECT" ||
+    Boolean(finalDecision.human_override_required);
+  const supplierUpdateNeeded =
+    finalDecision.final_decision === "REJECT" || severityAssessment.severity === "CRITICAL";
 
   return {
     ncr_report: shouldEscalate
@@ -44,6 +49,11 @@ export function runEscalationNotifyAgent(input, finalDecision, severityAssessmen
     notifications_sent: shouldEscalate
       ? ["Quality Engineer", "Line Supervisor", "Supplier Portal"]
       : ["Quality Inspector"],
+    supplier_updates: supplierUpdateNeeded
+      ? [
+          `Supplier quality update required for component ${input.component_id} from batch ${input.metadata?.batch_number || "unknown-batch"}.`,
+        ]
+      : [],
     copq_estimate: shouldEscalate ? "High - scrap, downtime, and containment cost expected" : "Low",
     audit_log: `Inspection recorded for component ${input.component_id} on line ${input.line_id}.`,
   };
