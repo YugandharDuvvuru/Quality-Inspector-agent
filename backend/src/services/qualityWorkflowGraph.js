@@ -34,7 +34,7 @@ const compiledWorkflow = new StateGraph(InspectionState)
   .addEdge("visionInspector", "severityClassifier")
   .addConditionalEdges("severityClassifier", routeAfterSeverity)
   .addEdge("rootCauseAnalyst", "decisionAction")
-  .addConditionalEdges("decisionAction", routeAfterDecision)
+  .addEdge("decisionAction", "escalationNotify")
   .addEdge("escalationNotify", "finalize")
   .addEdge("finalize", END)
   .compile();
@@ -87,20 +87,8 @@ function routeAfterSeverity(state) {
   return hasDefects(state) ? "rootCauseAnalyst" : "decisionAction";
 }
 
-function routeAfterDecision(state) {
-  return shouldEscalate(state) ? "escalationNotify" : "finalize";
-}
-
 function hasDefects(state) {
   return Boolean(state.visionResult?.inspection_summary?.defects_detected?.length);
-}
-
-function shouldEscalate(state) {
-  return (
-    state.severityAssessment?.severity === "CRITICAL" ||
-    state.decisionResult?.final_decision?.final_decision === "REJECT" ||
-    Boolean(state.decisionResult?.final_decision?.human_override_required)
-  );
 }
 
 function buildSkippedRootCauseAnalysis(visionResult) {

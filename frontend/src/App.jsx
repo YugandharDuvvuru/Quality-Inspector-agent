@@ -1,30 +1,26 @@
 import React from "react";
 import {
-  ClipboardCheck,
-  Cloud,
-  Factory,
+  FileDown,
   Image as ImageIcon,
   Link2,
   Loader2,
-  ShieldCheck,
+  LogOut,
+  RefreshCw,
+  UserRound,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { submitInspection } from "./api.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  downloadInspectionReport,
+  fetchCurrentUser,
+  fetchInspectionByTrace,
+  fetchInspections,
+  loginAccount,
+  logoutAccount,
+  registerAccount,
+  submitInspection,
+} from "./api.js";
 
-const samplePayload = {
-  component_id: "CMP-AXLE-1042",
-  image_url: "https://example.com/images/corrosion-bearing-race.jpg",
-  inspection_station: "Vision Station A3",
-  line_id: "LINE-07",
-  metadata: {
-    material: "Forged steel",
-    supplier: "Supplier Alpha",
-    batch_number: "BATCH-2026-0705",
-    dimensions: "OD 82mm, ID 42mm",
-    tolerance_range: "+/- 0.03mm",
-    notes: "Operator noted corrosion-like discoloration near outer face",
-  },
-};
+const HUMAN_REVIEW_THRESHOLD = 0.75;
 
 const blankForm = {
   component_id: "",
@@ -42,63 +38,173 @@ const blankForm = {
   notes: "",
 };
 
+const samplePlaceholders = {
+  component_id: "COMP-100047",
+  image_url: "s3://bucket-next-sample/QualityInspector/sample-part.png",
+  inspection_station: "VISION-STATION-07",
+  line_id: "LINE-A",
+  material: "cast aluminum",
+  supplier: "Supplier-A",
+  batch_number: "BATCH-2026-06-30-A",
+  dimensions: "120mm x 80mm x 35mm",
+  tolerance_range: "+/-0.05mm",
+  notes: "Component captured at final inspection station.",
+};
+
 const workflowDefinitions = [
   { key: "vision", index: "01", title: "Vision Inspector" },
   { key: "severity", index: "02", title: "Severity Classifier" },
   { key: "rootCause", index: "03", title: "Root Cause Analyst" },
   { key: "decision", index: "04", title: "Decision and Action" },
   { key: "notify", index: "05", title: "Escalation and Notify" },
-  { key: "integration", index: "06", title: "Enterprise Integration" },
 ];
 
 export function App() {
-  const [form, setForm] = useState(() => ({
-    component_id: samplePayload.component_id,
-    image_url: samplePayload.image_url,
-    inspection_station: samplePayload.inspection_station,
-    line_id: samplePayload.line_id,
-    ...samplePayload.metadata,
-  }));
-  const [result, setResult] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [session, setSession] = useState(null);
+  const [isSessionChecking, setIsSessionChecking] = useState(true);
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({
+    name: "",
+    mobile: "",
+    email: "",
+    password: "",
+  });
+  const [authError, setAuthError] = useState("");
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [view, setView] = useState("dashboard");
+  const [form, setForm] = useState(blankForm);
+  const [inspections, setInspections] = useState([]);
+  const [selectedInspection, setSelectedInspection] = useState(null);
+  const [currentResult, setCurrentResult] = useState(null);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [isInspectionRunning, setIsInspectionRunning] = useState(false);
+  const [isReportDownloading, setIsReportDownloading] = useState(false);
   const [error, setError] = useState("");
-  const [fileInputKey, setFileInputKey] = useState(0);
+  const [fileInputKey] = useState(0);
+  const activeInspectionController = useRef(null);
 
-  const verdictTone = useMemo(
-    () => getVerdictTone(result?.final_decision?.final_decision),
-    [result]
+  useEffect(() => {
+    let ignore = false;
+
+    async function initializeSession() {
+      try {
+        const data = await fetchCurrentUser();
+
+        if (ignore) {
+          return;
+        }
+
+        const nextSession = { user: data.user };
+        setSession(nextSession);
+        await loadInspectionHistory({ silent: true });
+      } catch {
+        if (!ignore) {
+          setSession(null);
+        }
+      } finally {
+        if (!ignore) {
+          setIsSessionChecking(false);
+        }
+      }
+    }
+
+    initializeSession();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const workflowSteps = useMemo(
+    () => buildWorkflowSteps({ isInspectionRunning, result: currentResult }),
+    [isInspectionRunning, currentResult]
   );
-  const workflowSteps = useMemo(() => buildWorkflowSteps(result), [result]);
-  const findings = result?.inspection_summary?.defects_detected || [];
-  const actions = result?.root_cause_analysis?.recommended_actions || [];
-  const notifications = result?.notifications?.notifications_sent || [];
-  const integrations = result?.enterprise_integrations || [];
+
+  async function loadInspectionHistory(options = {}) {
+    if (!session && !isSessionChecking && !options.silent) {
+      return;
+    }
+
+    if (!options.silent) {
+      setIsHistoryLoading(true);
+    }
+
+    setError("");
+
+    try {
+      const data = await fetchInspections();
+      setInspections(data);
+    } catch (requestError) {
+      handleRequestError(requestError);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
+  function handleRequestError(requestError) {
+    if (requestError.message === "Authentication required") {
+      setSession(null);
+      return;
+    }
+
+    setError(requestError.message);
+  }
 
   function updateField(event) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  function loadSample() {
-    setForm({
-      component_id: samplePayload.component_id,
-      image_url: samplePayload.image_url,
-      image_base64: "",
-      image_media_type: "",
-      image_file_name: "",
-      inspection_station: samplePayload.inspection_station,
-      line_id: samplePayload.line_id,
-      ...samplePayload.metadata,
-    });
-    setFileInputKey((current) => current + 1);
-    setError("");
+  function updateAuthField(event) {
+    const { name, value } = event.target;
+    setAuthForm((current) => ({ ...current, [name]: value }));
   }
 
-  function clearForm() {
-    setForm(blankForm);
-    setResult(null);
-    setError("");
-    setFileInputKey((current) => current + 1);
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setIsAuthLoading(true);
+    setAuthError("");
+
+    try {
+      const authPayload =
+        authMode === "register"
+          ? {
+              name: authForm.name,
+              mobile: authForm.mobile,
+              email: authForm.email,
+              password: authForm.password,
+            }
+          : {
+              email: authForm.email,
+              password: authForm.password,
+            };
+      const nextSession =
+        authMode === "register"
+          ? await registerAccount(authPayload)
+          : await loginAccount(authPayload);
+
+      setSession(nextSession);
+      setAuthForm({ name: "", mobile: "", email: "", password: "" });
+      setView("dashboard");
+      await loadInspectionHistory({ silent: true });
+    } catch (requestError) {
+      setAuthError(requestError.message);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    setSession(null);
+    setInspections([]);
+    setSelectedInspection(null);
+    setCurrentResult(null);
+
+    try {
+      await logoutAccount();
+    } catch {
+      // Local logout still completes when the server session has already expired.
+    }
   }
 
   async function handleImageUpload(event) {
@@ -138,16 +244,19 @@ export function App() {
 
   async function handleSubmit(event) {
     event.preventDefault();
-    setIsLoading(true);
+    setIsInspectionRunning(true);
+    setCurrentResult(null);
     setError("");
 
     if (!form.image_base64 && !form.image_url.trim()) {
       setError("Please upload an image or provide an image URL.");
-      setIsLoading(false);
+      setIsInspectionRunning(false);
       return;
     }
 
     try {
+      const controller = new AbortController();
+      activeInspectionController.current = controller;
       const payload = {
         component_id: form.component_id,
         image_url: form.image_url,
@@ -166,367 +275,784 @@ export function App() {
           notes: form.notes,
         },
       };
+      const inspection = await submitInspection(payload, { signal: controller.signal });
 
-      const inspection = await submitInspection(payload);
-      setResult(inspection);
+      setCurrentResult(inspection);
+      setSelectedInspection(inspection);
+      await loadInspectionHistory({ silent: true });
     } catch (requestError) {
-      setError(requestError.message);
+      if (requestError.name === "AbortError") {
+        setError("Inspection request stopped in the browser. The backend may still finish the submitted run.");
+        return;
+      }
+
+      handleRequestError(requestError);
     } finally {
-      setIsLoading(false);
+      activeInspectionController.current = null;
+      setIsInspectionRunning(false);
     }
   }
 
+  function handleStopInspection() {
+    if (activeInspectionController.current) {
+      activeInspectionController.current.abort();
+      return;
+    }
+
+    setCurrentResult(null);
+    setSelectedInspection(null);
+    setError("");
+  }
+
+  async function handleOpenInspection(inspection) {
+    setError("");
+
+    try {
+      const detail = inspection.trace_id
+        ? await fetchInspectionByTrace(inspection.trace_id)
+        : inspection;
+
+      setSelectedInspection(detail);
+      setCurrentResult(detail);
+      setView("detail");
+    } catch (requestError) {
+      handleRequestError(requestError);
+    }
+  }
+
+  async function handleDownloadReport(inspection = selectedInspection || currentResult) {
+    if (!inspection?.trace_id) {
+      setError("Report download requires a persisted inspection trace ID.");
+      return;
+    }
+
+    setIsReportDownloading(true);
+    setError("");
+    const reportWindow = window.open("about:blank", "_blank");
+
+    try {
+      const report = await downloadInspectionReport(inspection.trace_id);
+      const reportUrl = URL.createObjectURL(report.blob);
+
+      if (reportWindow) {
+        reportWindow.document.title = report.filename;
+        reportWindow.location.href = reportUrl;
+      } else {
+        const link = document.createElement("a");
+
+        link.href = reportUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+
+      window.setTimeout(() => URL.revokeObjectURL(reportUrl), 60000);
+    } catch (requestError) {
+      reportWindow?.close();
+      handleRequestError(requestError);
+    } finally {
+      setIsReportDownloading(false);
+    }
+  }
+
+  function startNewInspection() {
+    setView("new");
+    setCurrentResult(null);
+    setSelectedInspection(null);
+    setError("");
+  }
+
+  function goToDashboard() {
+    setView("dashboard");
+    setSelectedInspection(null);
+    loadInspectionHistory({ silent: true });
+  }
+
+  if (isSessionChecking) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <Loader2 className="spin" size={22} />
+          <strong>Checking secure session</strong>
+        </section>
+      </main>
+    );
+  }
+
+  if (!session?.user) {
+    return (
+      <AuthScreen
+        mode={authMode}
+        form={authForm}
+        error={authError}
+        isLoading={isAuthLoading}
+        onModeChange={setAuthMode}
+        onFieldChange={updateAuthField}
+        onSubmit={handleAuthSubmit}
+      />
+    );
+  }
+
   return (
-    <main className="dashboard-shell">
-      <section className="hero-band">
-        <div className="hero-copy">
-          <p className="hero-kicker"> AI Quality Analysis </p>
-          <h1>Manufacturing Component Quality Inspector</h1>
-          <p className="hero-text">
-            A unified view of inspection outcomes, quality risk, corrective action, escalation, and
-            enterprise traceability.
-          </p>
+    <main className="app-shell">
+      <TopBar
+        view={view}
+        user={session.user}
+        onDashboard={goToDashboard}
+        onNewInspection={startNewInspection}
+        onLogout={handleLogout}
+      />
+
+      {error ? <p className="global-error">{error}</p> : null}
+
+      {view === "dashboard" ? (
+        <DashboardView
+          inspections={inspections}
+          isLoading={isHistoryLoading}
+          onRefresh={() => loadInspectionHistory()}
+          onOpen={handleOpenInspection}
+        />
+      ) : null}
+
+      {view === "new" ? (
+        <NewInspectionView
+          form={form}
+          fileInputKey={fileInputKey}
+          workflowSteps={workflowSteps}
+          result={currentResult}
+          isRunning={isInspectionRunning}
+          isReportDownloading={isReportDownloading}
+          onFieldChange={updateField}
+          onImageUpload={handleImageUpload}
+          onSubmit={handleSubmit}
+          onStop={handleStopInspection}
+          onDownloadReport={() => handleDownloadReport(currentResult)}
+        />
+      ) : null}
+
+      {view === "detail" ? (
+        <DetailView
+          inspection={selectedInspection}
+          isReportDownloading={isReportDownloading}
+          onBack={goToDashboard}
+          onDownloadReport={() => handleDownloadReport(selectedInspection)}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function TopBar({ view, user, onDashboard, onNewInspection, onLogout }) {
+  const isDetailView = view === "detail";
+  const displayName = user?.name || user?.email || "Signed in";
+
+  return (
+    <header className={`top-bar ${isDetailView ? "detail-mode" : ""}`}>
+      <div>
+        <p className="eyebrow">{isDetailView ? "Inspection Result" : "Quality Operations"}</p>
+        <h1>Manufacturing Component Quality Inspector</h1>
+        <p>
+          {isDetailView
+            ? "Review the complete output, escalation, enterprise dispatch, and audit trail for one inspection."
+            : "Dashboard of inspection severity, workflow status, decisions, and result traceability."}
+        </p>
+      </div>
+      <div className="top-right">
+        <span className="user-chip">
+          <UserRound size={18} />
+          <strong>{displayName}</strong>
+        </span>
+        <nav className="top-actions" aria-label="Primary navigation">
+          <button className={view === "dashboard" ? "active" : ""} type="button" onClick={onDashboard}>
+            Dashboard
+          </button>
+          {!isDetailView ? (
+            <button className={view === "new" ? "active" : ""} type="button" onClick={onNewInspection}>
+              New Inspection
+            </button>
+          ) : null}
+        </nav>
+        <button className="logout-action" type="button" onClick={onLogout} title="Logout">
+          <LogOut size={16} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function DashboardView({ inspections, isLoading, onRefresh, onOpen }) {
+  return (
+    <section className="page-panel history-panel">
+      <div className="panel-toolbar">
+        <div>
+          <p className="eyebrow">Inspection History</p>
+          <h2>Previous Inspections</h2>
         </div>
-        <div className="hero-status">
-          <StatusChip icon={Factory} label="5 Agents" />
-          <StatusChip icon={ShieldCheck} label="IATF 16949" />
-          <StatusChip icon={ClipboardCheck} label="ISO 9001" />
+        <button className="icon-text-button" type="button" onClick={onRefresh} disabled={isLoading}>
+          <RefreshCw className={isLoading ? "spin" : ""} size={16} />
+          Refresh
+        </button>
+      </div>
+
+      <div className="history-table" role="table" aria-label="Inspection history">
+        <div className="history-row history-head" role="row">
+          <span>TraceID</span>
+          <span>Component</span>
+          <span>Status</span>
+          <span>Verdict</span>
+          <span>Severity</span>
+          <span>Result</span>
+        </div>
+
+        {inspections.length ? (
+          inspections.map((inspection) => (
+            <div className="history-row" role="row" key={inspection.trace_id || inspection.created_at}>
+              <strong>{inspection.trace_id || "Trace unavailable"}</strong>
+              <strong>{inspection.component_id || "-"}</strong>
+              <StatusPill value={getInspectionStatus(inspection)} />
+              <StatusPill value={inspection.final_decision?.final_decision || "-"} />
+              <StatusPill value={inspection.severity_assessment?.severity || "-"} />
+              <button className="open-link" type="button" onClick={() => onOpen(inspection)}>
+                Open
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="empty-history">
+            {isLoading ? "Loading inspection history..." : "No inspections are available yet."}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function NewInspectionView({
+  form,
+  fileInputKey,
+  workflowSteps,
+  result,
+  isRunning,
+  isReportDownloading,
+  onFieldChange,
+  onImageUpload,
+  onSubmit,
+  onStop,
+  onDownloadReport,
+}) {
+  return (
+    <>
+      <section className="page-panel status-panel">
+        <p className="eyebrow">New Inspection</p>
+        <h2>Inspection Status</h2>
+        <p>
+          {result
+            ? `Inspection completed for ${result.component_id}. Final result: ${result.final_decision?.final_decision || "-"}`
+            : isRunning
+              ? "Inspection request is running through the agent workflow."
+              : "Agent status appears here while the inspection request runs."}
+        </p>
+        {result ? (
+          <div className="status-summary">
+            <StatusPill value={getInspectionStatus(result)} />
+            <StatusPill value={result.final_decision?.final_decision || "-"} />
+            <StatusPill value={result.severity_assessment?.severity || "-"} />
+            <span>{formatPercent(result.confidence_score)} confidence</span>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="page-panel workflow-panel">
+        <h2>Agent Workflow</h2>
+        <div className="agent-grid">
+          {workflowSteps.map((step) => (
+            <article className={`agent-card ${step.statusTone}`} key={step.index}>
+              <span>{step.index}</span>
+              <strong>{step.title}</strong>
+              <p>{step.status}</p>
+            </article>
+          ))}
         </div>
       </section>
 
-      <section className="dashboard-grid">
-        <form className="request-panel" onSubmit={handleSubmit}>
-          <div className="panel-title-block">
-            <h2>Inspection Request</h2>
-            <p>Submit a new component image, URL, or S3 URI for multi-agent review.</p>
-          </div>
-
-          <div className="request-fields">
-            <Input label="Component ID" name="component_id" value={form.component_id} onChange={updateField} required />
-            <Input
-              label="Inspection Station"
-              name="inspection_station"
-              value={form.inspection_station}
-              onChange={updateField}
-              required
+      <section className="inspection-form-wrap">
+        <form className="inspection-form" onSubmit={onSubmit}>
+          <h2>New Inspection Request</h2>
+          <Input
+            label="Component ID"
+            name="component_id"
+            value={form.component_id}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.component_id}
+            required
+          />
+          <Input
+            label="Inspection Station"
+            name="inspection_station"
+            value={form.inspection_station}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.inspection_station}
+            required
+          />
+          <Input
+            label="Line"
+            name="line_id"
+            value={form.line_id}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.line_id}
+            required
+          />
+          <Input label="Timestamp(yyyy-MM-ddTHH:mm:ss)" value={new Date().toISOString()} readOnly />
+          <label className="field">
+            <span>Image Path, URL, or S3 URI</span>
+            <textarea
+              name="image_url"
+              rows="4"
+              value={form.image_url}
+              onChange={onFieldChange}
+              placeholder={samplePlaceholders.image_url}
             />
-            <Input label="Line" name="line_id" value={form.line_id} onChange={updateField} required />
-            <Input label="Timestamp" value={new Date().toISOString()} readOnly />
-            <label className="field field-full">
-              <span>Image Path, URL, or S3 URI</span>
-              <textarea
-                name="image_url"
-                rows="3"
-                value={form.image_url}
-                onChange={updateField}
-                placeholder="https://... or s3://bucket/path"
-              />
-            </label>
-            <label className="field field-full">
-              <span>Local Image File</span>
-              <input key={fileInputKey} type="file" accept="image/*" onChange={handleImageUpload} />
-              {form.image_file_name ? <small>{form.image_file_name}</small> : null}
-            </label>
-            <Input label="Material" name="material" value={form.material} onChange={updateField} />
-            <Input label="Supplier" name="supplier" value={form.supplier} onChange={updateField} />
-            <Input label="Batch" name="batch_number" value={form.batch_number} onChange={updateField} />
-            <Input label="Dimensions" name="dimensions" value={form.dimensions} onChange={updateField} />
-            <Input label="Tolerance" name="tolerance_range" value={form.tolerance_range} onChange={updateField} />
-            <label className="field field-full">
-              <span>Inspection Notes</span>
-              <textarea name="notes" rows="5" value={form.notes} onChange={updateField} />
-            </label>
-          </div>
+          </label>
+          <label className="field">
+            <span>Local Image File</span>
+            <input key={fileInputKey} type="file" accept="image/*" onChange={onImageUpload} />
+            <small>{form.image_file_name || "No file chosen"}</small>
+          </label>
+          <Input
+            label="Material"
+            name="material"
+            value={form.material}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.material}
+          />
+          <Input
+            label="Supplier"
+            name="supplier"
+            value={form.supplier}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.supplier}
+          />
+          <Input
+            label="Batch"
+            name="batch_number"
+            value={form.batch_number}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.batch_number}
+          />
+          <Input
+            label="Dimensions"
+            name="dimensions"
+            value={form.dimensions}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.dimensions}
+          />
+          <Input
+            label="Tolerance"
+            name="tolerance_range"
+            value={form.tolerance_range}
+            onChange={onFieldChange}
+            placeholder={samplePlaceholders.tolerance_range}
+          />
+          <label className="field">
+            <span>Inspection Notes</span>
+            <textarea
+              name="notes"
+              rows="4"
+              value={form.notes}
+              onChange={onFieldChange}
+              placeholder={samplePlaceholders.notes}
+            />
+          </label>
 
-          <div className="input-evidence">
+          <div className="evidence-row">
             <EvidencePill icon={Link2} label={form.image_url ? "Source URL or S3 URI ready" : "No URL provided"} />
-            <EvidencePill
-              icon={ImageIcon}
-              label={form.image_file_name ? `${form.image_file_name}` : "No local file selected"}
-            />
+            <EvidencePill icon={ImageIcon} label={form.image_file_name || "No local file selected"} />
           </div>
 
-          {error ? <p className="error-banner">{error}</p> : null}
-
-          <div className="request-actions">
-            <button className="primary-action" type="submit" disabled={isLoading}>
-              {isLoading ? <Loader2 className="spin" size={18} /> : null}
-              {isLoading ? "Running Inspection" : "Run Inspection"}
-            </button>
-            <button className="secondary-action" type="button" disabled={isLoading}>
-              Stop Inspection
-            </button>
-            <button className="secondary-action" type="button" onClick={loadSample}>
-              Load Sample
-            </button>
-            <button className="ghost-action" type="button" onClick={clearForm}>
-              Clear
-            </button>
+          <button className="primary-action" type="submit" disabled={isRunning}>
+            {isRunning ? <Loader2 className="spin" size={16} /> : null}
+            {isRunning ? "Running Inspection" : "Run Inspection"}
+          </button>
+          <button className="danger-action" type="button" onClick={onStop}>
+            Stop Inspection
+          </button>
+          <div className="form-secondary-actions">
+            {result?.trace_id ? (
+              <button className="secondary-action" type="button" onClick={onDownloadReport} disabled={isReportDownloading}>
+                {isReportDownloading ? "Preparing PDF" : "Download NCR PDF"}
+              </button>
+            ) : null}
           </div>
         </form>
+      </section>
+    </>
+  );
+}
 
-        <section className="results-area">
-          <div className="summary-grid">
-            <SummaryCard
-              label="Workflow"
-              value={getWorkflowHeadline(result)}
-              tone={result?.final_decision?.human_override_required ? "warning" : "neutral"}
-            />
-            <SummaryCard
-              label="Final Decision"
-              value={result?.final_decision?.final_decision || "Awaiting input"}
-              tone={verdictTone}
-            />
-            <SummaryCard
-              label="Severity"
-              value={result?.severity_assessment?.severity || "-"}
-              tone={verdictTone}
-            />
-            <SummaryCard
-              label="Confidence"
-              value={formatPercent(result?.confidence_score)}
-              tone="neutral"
-            />
-            <SummaryCard
-              label="Defects"
-              value={String(findings.length)}
-              tone={findings.length ? "danger" : "success"}
-            />
+function DetailView({ inspection, isReportDownloading, onBack, onDownloadReport }) {
+  if (!inspection) {
+    return (
+      <section className="page-panel">
+        <button className="back-link" type="button" onClick={onBack}>
+          Back to Dashboard
+        </button>
+        <p>No inspection selected.</p>
+      </section>
+    );
+  }
+
+  const findings = inspection.inspection_summary?.defects_detected || [];
+  const actions = inspection.root_cause_analysis?.recommended_actions || [];
+  const integrations = inspection.enterprise_integrations || [];
+  const notifications = inspection.notifications?.notifications_sent || [];
+  const notificationItems = notifications.map(normalizeNotificationForDisplay).filter(Boolean);
+
+  return (
+    <section className="result-page">
+      <button className="back-link" type="button" onClick={onBack}>
+        Back to Dashboard
+      </button>
+
+      <div className="result-grid">
+        <section className="result-card">
+          <div className="card-heading">
+            <h2>Inspection</h2>
+            <StatusPill value={getInspectionStatus(inspection)} />
           </div>
+          <Definition label="Component" value={inspection.component_id || "-"} />
+          <Definition label="Trace" value={shortTrace(inspection.trace_id)} />
+          <Definition label="Confidence" value={formatPercent(inspection.confidence_score)} />
+          <Definition label="Source" value={sourceLabel(inspection.source)} />
+        </section>
 
-          <section className="content-panel">
-            <div className="section-heading">
-              <div>
-                <p className="section-kicker">Workflow</p>
-                <h3>Agent Workflow</h3>
-              </div>
-              <SourceBadge source={result?.source} />
-            </div>
-            <div className="workflow-grid">
-              {workflowSteps.map((step) => (
-                <WorkflowCard key={step.index} step={step} />
+        <section className="result-card">
+          <div className="card-heading">
+            <h2>Severity</h2>
+            <StatusPill value={inspection.severity_assessment?.severity || "-"} />
+          </div>
+          <Definition label="Verdict" value={inspection.final_decision?.final_decision || "-"} />
+          <Definition label="Line" value={inspection.final_decision?.line_action || "-"} />
+          <Definition label="Batch" value={inspection.final_decision?.batch_action || "-"} />
+          <p className="detail-copy">
+            {inspection.final_decision?.justification ||
+              inspection.severity_assessment?.reasoning ||
+              "Severity reasoning is not available."}
+          </p>
+        </section>
+
+        <section className="result-card">
+          <h2>Vision Inspector</h2>
+          <div className="stack-list">
+            {findings.length ? (
+              findings.map((defect) => (
+                <div className="mini-row" key={`${defect.defect_type}-${defect.location}`}>
+                  <div>
+                    <strong>{toTitle(defect.defect_type)}</strong>
+                    <span>{toTitle(defect.location)}</span>
+                  </div>
+                  <strong>{formatPercent(defect.confidence)}</strong>
+                </div>
+              ))
+            ) : (
+              <p className="muted">No defects detected.</p>
+            )}
+          </div>
+          <p className="detail-copy">{inspection.inspection_summary?.reasoning || "-"}</p>
+        </section>
+
+        <section className="result-card">
+          <h2>Root Cause Analyst</h2>
+          <p className="detail-copy">{inspection.root_cause_analysis?.root_cause || "-"}</p>
+          <Definition label="Recurrence Risk" value={inspection.root_cause_analysis?.recurrence_risk || "-"} />
+          <div className="stack-list">
+            {actions.length ? (
+              actions.map((action) => (
+                <div className="mini-row" key={`${action.owner}-${action.timeline}`}>
+                  <div>
+                    <strong>{action.owner}</strong>
+                    <span>{action.action}</span>
+                  </div>
+                  <strong>{action.timeline}</strong>
+                </div>
+              ))
+            ) : (
+              <p className="muted">No corrective actions generated.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="result-card">
+          <h2>Decision and Action</h2>
+          <Definition label="Disposition" value={inspection.final_decision?.final_decision || "-"} />
+          <Definition label="Line Action" value={inspection.final_decision?.line_action || "-"} />
+          <Definition label="Batch Action" value={inspection.final_decision?.batch_action || "-"} />
+          <Definition
+            label="Human Review"
+            value={inspection.final_decision?.human_override_required ? "Required" : "Not Required"}
+          />
+          <p className="review-note">
+            {getHumanReviewReason(inspection, HUMAN_REVIEW_THRESHOLD)}
+          </p>
+        </section>
+
+        <section className="result-card">
+          <h2>Escalation and Notify</h2>
+          <p className="detail-copy">{inspection.notifications?.ncr_report || "-"}</p>
+          <button className="download-button" type="button" onClick={onDownloadReport} disabled={isReportDownloading}>
+            <FileDown size={16} />
+            {isReportDownloading ? "Preparing PDF" : "Download NCR PDF"}
+          </button>
+          <Definition label="COPQ Estimate" value={inspection.notifications?.copq_estimate || "-"} />
+          <Definition label="Audit Log" value={inspection.notifications?.audit_log || "-"} />
+          {notificationItems.length ? (
+            <div className="notification-list">
+              {notificationItems.map((item, index) => (
+                <div className="notification-card" key={`${item.title}-${index}`}>
+                  <strong>{item.title}</strong>
+                  <span>{item.message}</span>
+                  {item.meta ? <small>{item.meta}</small> : null}
+                </div>
               ))}
             </div>
-          </section>
+          ) : null}
+        </section>
 
-          <div className="details-grid">
-            <section className="content-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="section-kicker">Vision Inspector</p>
-                  <h3>Vision Findings</h3>
+        <section className="result-card wide-card">
+          <h2>Enterprise Dispatch</h2>
+          <div className="integration-table">
+            {integrations.length ? (
+              integrations.map((integration) => (
+                <div className="integration-row" key={integration.system_name}>
+                  <strong>{integration.system_name}</strong>
+                  <StatusPill value={integration.submission_status || "-"} />
+                  <span>{integration.external_reference || integration.error_detail || "No external reference returned"}</span>
                 </div>
-                {findings.length ? <StatusTag tone="success">Clear</StatusTag> : null}
-              </div>
+              ))
+            ) : (
+              <p className="muted">No enterprise submission records available.</p>
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
 
-              {findings.length ? (
-                <div className="finding-list">
-                  {findings.map((defect) => (
-                    <div className="finding-card" key={`${defect.defect_type}-${defect.location}`}>
-                      <div>
-                        <strong>{toTitle(defect.defect_type)}</strong>
-                        <p>{toTitle(defect.location)}</p>
-                      </div>
-                      <span>{formatPercent(defect.confidence)}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="body-copy muted-copy">No defects detected from the latest inspection result.</p>
-              )}
+function AuthScreen({ mode, form, error, isLoading, onModeChange, onFieldChange, onSubmit }) {
+  const isRegisterMode = mode === "register";
 
-              <p className="body-copy">
-                {result?.inspection_summary?.reasoning || "Inspection reasoning will appear after the first run."}
-              </p>
-            </section>
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="auth-brand">
+          <p className="eyebrow">Quality Operations</p>
+          <h1>Manufacturing Component Quality Inspector</h1>
+          <p>Secure access for quality engineers, line supervisors, and inspection teams.</p>
+        </div>
 
-            <section className="content-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="section-kicker">Severity Classifier</p>
-                  <h3>Severity Assessment</h3>
-                </div>
-                <StatusTag tone={verdictTone}>{result?.severity_assessment?.verdict || "Pending"}</StatusTag>
-              </div>
-
-              <div className="definition-grid">
-                <DefinitionRow label="Severity" value={result?.severity_assessment?.severity || "-"} />
-                <DefinitionRow
-                  label="Confidence"
-                  value={formatPercent(result?.severity_assessment?.confidence)}
-                />
-                <DefinitionRow
-                  label="Standard"
-                  value={result?.severity_assessment?.standard_reference || "-"}
-                  wide
-                />
-              </div>
-
-              <p className="body-copy">
-                {result?.final_decision?.justification ||
-                  "Disposition rationale will appear once an inspection has completed."}
-              </p>
-            </section>
-
-            <section className="content-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="section-kicker">Root Cause Analyst</p>
-                  <h3>Root Cause and Actions</h3>
-                </div>
-              </div>
-
-              <p className="body-copy">
-                {result?.root_cause_analysis?.root_cause || "Root-cause analysis is not available yet."}
-              </p>
-
-              <div className="action-list">
-                {actions.length ? (
-                  actions.map((action) => (
-                    <div className="action-card" key={`${action.action}-${action.owner}`}>
-                      <div>
-                        <strong>{action.owner}</strong>
-                        <p>{action.action}</p>
-                      </div>
-                      <span>{action.timeline}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted-copy">No corrective actions generated yet.</p>
-                )}
-              </div>
-            </section>
-
-            <section className="content-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="section-kicker">Decision and Action</p>
-                  <h3>Disposition Controls</h3>
-                </div>
-              </div>
-
-              <div className="metric-row">
-                <DetailMetric label="Disposition" value={result?.final_decision?.final_decision || "-"} />
-                <DetailMetric label="Line Action" value={result?.final_decision?.line_action || "-"} />
-                <DetailMetric label="Batch Action" value={result?.final_decision?.batch_action || "-"} />
-                <DetailMetric
-                  label="Human Review"
-                  value={result?.final_decision?.human_override_required ? "Required" : "Not Required"}
-                />
-              </div>
-
-              {result?.fallback_reason ? (
-                <p className="note-copy">Fallback reason: {result.fallback_reason}</p>
-              ) : null}
-            </section>
+        <form className="auth-card" onSubmit={onSubmit}>
+          <div>
+            <p className="eyebrow">Secure Access</p>
+            <h2>{isRegisterMode ? "Create Account" : "Login"}</h2>
           </div>
 
-          <section className="content-panel">
-            <div className="section-heading">
-              <div>
-                <p className="section-kicker">Escalation</p>
-                <h3>Escalation and Notifications</h3>
-              </div>
-            </div>
+          <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
+            <button className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>
+              Login
+            </button>
+            <button
+              className={mode === "register" ? "active" : ""}
+              type="button"
+              onClick={() => onModeChange("register")}
+            >
+              Register
+            </button>
+          </div>
 
-            <p className="headline-copy">
-              {result?.notifications?.ncr_report ||
-                "Escalation details will appear after the inspection agents complete."}
-            </p>
+          {isRegisterMode ? (
+            <>
+              <Input label="Name" name="name" value={form.name} onChange={onFieldChange} required />
+              <Input label="Mobile" name="mobile" value={form.mobile} onChange={onFieldChange} required />
+            </>
+          ) : null}
+          <Input label="Email" name="email" type="email" value={form.email} onChange={onFieldChange} required />
+          <Input
+            label="Password"
+            name="password"
+            type="password"
+            value={form.password}
+            onChange={onFieldChange}
+            required
+            minLength={isRegisterMode ? 8 : 1}
+          />
 
-            <div className="notification-chip-row">
-              {notifications.length ? (
-                notifications.map((entry) => (
-                  <span className="notification-chip" key={entry}>
-                    {entry}
-                  </span>
-                ))
-              ) : (
-                <span className="muted-copy">No notification targets recorded.</span>
-              )}
-            </div>
+          {error ? <p className="global-error compact">{error}</p> : null}
 
-            <div className="definition-grid compact-gap">
-              <DefinitionRow
-                label="COPQ Estimate"
-                value={result?.notifications?.copq_estimate || "Pending"}
-              />
-              <DefinitionRow label="Audit Log" value={result?.notifications?.audit_log || "Pending"} wide />
-            </div>
-          </section>
-
-          <section className="content-panel">
-            <div className="section-heading">
-              <div>
-                <p className="section-kicker">Enterprise</p>
-                <h3>Enterprise Submissions</h3>
-              </div>
-              <Cloud size={18} />
-            </div>
-
-            {result?.image_url ? (
-              <p className="body-copy">
-                Canonical image reference: <span className="inline-code">{result.image_url}</span>
-              </p>
-            ) : null}
-
-            <div className="integration-list">
-              {integrations.length ? (
-                integrations.map((integration) => (
-                  <IntegrationCard key={integration.system_name} integration={integration} />
-                ))
-              ) : (
-                <p className="muted-copy">No enterprise submission records available for this inspection.</p>
-              )}
-            </div>
-          </section>
-        </section>
+          <button className="primary-action" type="submit" disabled={isLoading}>
+            {isLoading ? <Loader2 className="spin" size={16} /> : null}
+            {isLoading ? "Please wait" : isRegisterMode ? "Create Account" : "Login"}
+          </button>
+        </form>
       </section>
     </main>
   );
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Could not read image file"));
-    reader.readAsDataURL(file);
-  });
+function Input({ label, ...props }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input {...props} />
+    </label>
+  );
 }
 
-function buildWorkflowSteps(result) {
-  if (!result) {
+function EvidencePill({ icon: Icon, label }) {
+  return (
+    <span className="evidence-pill">
+      <Icon size={14} />
+      {label}
+    </span>
+  );
+}
+
+function Definition({ label, value }) {
+  return (
+    <div className="definition">
+      <strong>{label}</strong>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+function StatusPill({ value }) {
+  const tone = getStatusTone(value);
+  return <span className={`status-pill ${tone}`}>{value}</span>;
+}
+
+function normalizeNotificationForDisplay(item) {
+  if (item && typeof item === "object") {
+    const message = item.message || item.action || item.summary || "";
+
+    if (!message && isPlaceholderNotificationText(item.recipient || item.stakeholder || item.channel)) {
+      return null;
+    }
+
+    return {
+      title: item.recipient || item.stakeholder || item.channel || "Notification",
+      message: message || JSON.stringify(item),
+      meta: [item.channel, item.priority].filter(Boolean).join(" | "),
+    };
+  }
+
+  const text = String(item || "").trim();
+
+  if (!text) {
+    return null;
+  }
+
+  if (text.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(text);
+
+      return normalizeNotificationForDisplay(parsed);
+    } catch {
+      return {
+        title: "Notification",
+        message: text,
+        meta: "",
+      };
+    }
+  }
+
+  const [possibleTitle, ...messageParts] = text.split(":");
+  const hasReadableTitle = messageParts.length > 0 && possibleTitle.length <= 48;
+  const messageText = hasReadableTitle ? messageParts.join(":").trim() : text;
+
+  if (
+    (!hasReadableTitle && isPlaceholderNotificationText(text)) ||
+    (hasReadableTitle && isPlaceholderNotificationText(messageText))
+  ) {
+    return null;
+  }
+
+  return {
+    title: hasReadableTitle ? possibleTitle.trim() : "Notification",
+    message: messageText,
+    meta: "",
+  };
+}
+
+function isPlaceholderNotificationText(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const withoutNotificationLabel = normalized.startsWith("notification:")
+    ? normalized.slice("notification:".length).trim()
+    : normalized;
+
+  return [
+    "notification",
+    "quality inspector",
+    "quality engineer",
+    "line supervisor",
+    "mes",
+    "erp",
+    "servicenow",
+    "supplier portal",
+  ].includes(withoutNotificationLabel);
+}
+
+function buildWorkflowSteps({ isInspectionRunning, result }) {
+  if (result) {
     return workflowDefinitions.map((step) => ({
       ...step,
-      status: "Waiting",
-      tone: "idle",
+      status: "Completed",
+      statusTone: "completed",
+    }));
+  }
+
+  if (isInspectionRunning) {
+    return workflowDefinitions.map((step, index) => ({
+      ...step,
+      status: index === 0 ? "Running" : "Waiting",
+      statusTone: index === 0 ? "running" : "waiting",
     }));
   }
 
   return workflowDefinitions.map((step) => ({
     ...step,
-    status: step.key === "integration" ? "Submitted" : "Completed",
-    tone:
-      step.key === "decision" && result.final_decision?.human_override_required
-        ? "warning"
-        : "done",
+    status: "Waiting",
+    statusTone: "waiting",
   }));
 }
 
-function getWorkflowHeadline(result) {
-  if (!result) {
-    return "Awaiting Request";
+function getInspectionStatus(inspection) {
+  if (!inspection) {
+    return "WAITING";
   }
 
-  return result.final_decision?.human_override_required ? "Needs Human Review" : "Completed";
+  return inspection.final_decision?.human_override_required ? "NEEDS_HUMAN_REVIEW" : "COMPLETED";
 }
 
-function getVerdictTone(verdict) {
-  if (verdict === "REJECT") return "danger";
-  if (verdict === "REWORK") return "warning";
-  if (verdict === "PASS") return "success";
+function getStatusTone(value) {
+  const normalized = String(value || "").toUpperCase();
+
+  if (["COMPLETED", "PASS", "SUCCESS", "SUBMITTED"].includes(normalized)) return "success";
+  if (["NEEDS_HUMAN_REVIEW", "REWORK", "MINOR", "MAJOR", "MEDIUM"].includes(normalized)) return "warning";
+  if (["REJECT", "CRITICAL", "FAILED", "HIGH"].includes(normalized)) return "danger";
   return "neutral";
+}
+
+function getHumanReviewReason(inspection, threshold) {
+  const confidence = inspection?.confidence_score;
+  const reviewRequired = Boolean(inspection?.final_decision?.human_override_required);
+  const confidenceText = formatPercent(confidence);
+  const thresholdText = formatPercent(threshold);
+
+  return reviewRequired
+    ? `Manual review is required because inspection confidence is ${confidenceText}, below the ${thresholdText} approval threshold.`
+    : `Manual review is not required because inspection confidence is ${confidenceText}, meeting the ${thresholdText} approval threshold.`;
 }
 
 function formatPercent(value) {
@@ -547,123 +1073,26 @@ function toTitle(value) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function getIntegrationTone(status) {
-  if (status === "SUCCESS") return "success";
-  if (status === "FAILED") return "danger";
-  return "warning";
-}
-
-function getIntegrationLabel(status) {
-  if (!status) {
-    return "Attention";
+function shortTrace(traceId) {
+  if (!traceId) {
+    return "-";
   }
 
-  return status.replace(/_/g, " ");
+  return traceId.length > 14 ? `${traceId.slice(0, 8)}...${traceId.slice(-4)}` : traceId;
 }
 
-function StatusChip({ icon: Icon, label }) {
-  return (
-    <span className="status-chip">
-      <Icon size={16} />
-      {label}
-    </span>
-  );
+function sourceLabel(source) {
+  if (source === "aws-bedrock") return "AWS Bedrock";
+  if (source === "hybrid-fallback") return "Hybrid Fallback";
+  if (source === "local-fallback") return "Local Fallback";
+  return source || "-";
 }
 
-function EvidencePill({ icon: Icon, label }) {
-  return (
-    <span className="evidence-pill">
-      <Icon size={15} />
-      {label}
-    </span>
-  );
-}
-
-function Input({ label, full, ...props }) {
-  return (
-    <label className={`field ${full ? "field-full" : ""}`}>
-      <span>{label}</span>
-      <input {...props} />
-    </label>
-  );
-}
-
-function SummaryCard({ label, value, tone = "neutral" }) {
-  return (
-    <div className={`summary-card ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function WorkflowCard({ step }) {
-  return (
-    <div className={`workflow-card ${step.tone}`}>
-      <span className="workflow-index">{step.index}</span>
-      <strong>{step.title}</strong>
-      <p>{step.status}</p>
-    </div>
-  );
-}
-
-function DefinitionRow({ label, value, wide = false }) {
-  return (
-    <div className={`definition-row ${wide ? "wide" : ""}`}>
-      <span>{label}</span>
-      <p>{value}</p>
-    </div>
-  );
-}
-
-function DetailMetric({ label, value }) {
-  return (
-    <div className="detail-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function StatusTag({ tone = "neutral", children }) {
-  return <span className={`status-tag ${tone}`}>{children}</span>;
-}
-
-function SourceBadge({ source, compact = false }) {
-  if (!source) {
-    return <span className={`source-badge neutral ${compact ? "compact" : ""}`}>Unknown</span>;
-  }
-
-  const label =
-    source === "aws-bedrock"
-      ? "AWS Bedrock"
-      : source === "hybrid-fallback"
-        ? "Hybrid Fallback"
-        : "Local Fallback";
-
-  const tone =
-    source === "aws-bedrock"
-      ? "bedrock"
-      : source === "hybrid-fallback"
-        ? "warning"
-        : "fallback";
-
-  return <span className={`source-badge ${tone} ${compact ? "compact" : ""}`}>{label}</span>;
-}
-
-function IntegrationCard({ integration }) {
-  return (
-    <div className="integration-card">
-      <div>
-        <strong>{integration.system_name}</strong>
-        <p>{integration.external_reference || "No external reference returned"}</p>
-      </div>
-      <div className="integration-status">
-        <StatusTag tone={getIntegrationTone(integration.submission_status)}>
-          {getIntegrationLabel(integration.submission_status)}
-        </StatusTag>
-        <span>{integration.error_detail || "Submission record stored successfully."}</span>
-      </div>
-    </div>
-  );
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Could not read image file"));
+    reader.readAsDataURL(file);
+  });
 }

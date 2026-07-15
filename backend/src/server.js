@@ -7,14 +7,23 @@ import { getDatabaseStatus, initializeDatabase } from "./db/connection.js";
 import { debugRouter } from "./routes/debugRoutes.js";
 import { inspectionRouter } from "./routes/inspectionRoutes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { requireAuth } from "./middleware/authMiddleware.js";
+import { authRouter } from "./routes/authRoutes.js";
 
 const app = express();
 
 const routeCatalog = [
   { method: "GET", path: "/api", purpose: "Service metadata and available routes" },
   { method: "GET", path: "/api/health", purpose: "Backend, Bedrock, and database readiness" },
+  { method: "POST", path: "/api/auth/register", purpose: "Register a quality inspection user" },
+  { method: "POST", path: "/api/auth/login", purpose: "Login and create a secure session" },
+  { method: "GET", path: "/api/auth/me", purpose: "Get the authenticated user profile" },
+  { method: "POST", path: "/api/auth/logout", purpose: "Revoke the active user session" },
   { method: "GET", path: "/api/inspections", purpose: "List persisted inspection history" },
+  { method: "GET", path: "/api/inspections/trace/:traceId", purpose: "Get one inspection by trace ID" },
+  { method: "GET", path: "/api/inspections/trace/:traceId/report.pdf", purpose: "Download NCR PDF by trace ID" },
   { method: "GET", path: "/api/inspections/:componentId", purpose: "Get latest inspection for one component" },
+  { method: "GET", path: "/api/inspections/:componentId/report.pdf", purpose: "Download latest NCR PDF report" },
   { method: "POST", path: "/api/inspections", purpose: "Run the quality inspection workflow" },
   { method: "GET", path: "/api/debug/bedrock", purpose: "Inspect Bedrock runtime configuration metadata" },
   { method: "POST", path: "/api/debug/bedrock/probe", purpose: "Run a live Bedrock connectivity probe" },
@@ -24,6 +33,8 @@ const routeCatalog = [
 app.use(helmet());
 app.use(
   cors({
+    credentials: true,
+    exposedHeaders: ["Content-Disposition"],
     origin(origin, callback) {
       if (!origin || env.FRONTEND_ORIGINS.includes(origin)) {
         return callback(null, true);
@@ -57,8 +68,9 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.use("/api/inspections", inspectionRouter);
-app.use("/api/debug", debugRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/inspections", requireAuth, inspectionRouter);
+app.use("/api/debug", requireAuth, debugRouter);
 app.use(errorHandler);
 
 async function bootstrap() {

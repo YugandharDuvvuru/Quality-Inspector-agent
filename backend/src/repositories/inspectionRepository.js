@@ -3,28 +3,27 @@ import { query, withTransaction } from "../db/connection.js";
 export async function listLatestInspectionsFromDatabase() {
   const result = await query(
     `
-      SELECT latest.raw_response
-      FROM (
-        SELECT DISTINCT ON (c.component_code)
-          c.component_code,
-          ir.created_at,
-          ir.raw_response
-        FROM inspection_results ir
-        JOIN inspection_requests req ON req.id = ir.inspection_request_id
-        JOIN components c ON c.id = req.component_id
-        ORDER BY c.component_code, ir.created_at DESC
-      ) AS latest
-      ORDER BY latest.created_at DESC
+      SELECT
+        ir.trace_id,
+        ir.raw_response,
+        ir.created_at
+      FROM inspection_results ir
+      ORDER BY ir.created_at DESC
+      LIMIT 100
     `
   );
 
-  return result.rows.map((row) => row.raw_response);
+  return result.rows.map((row) => ({
+    ...row.raw_response,
+    trace_id: row.raw_response?.trace_id || row.trace_id,
+    created_at: row.raw_response?.created_at || row.created_at,
+  }));
 }
 
 export async function getLatestInspectionByComponentIdFromDatabase(componentId) {
   const result = await query(
     `
-      SELECT ir.raw_response
+      SELECT ir.trace_id, ir.raw_response, ir.created_at
       FROM inspection_results ir
       JOIN inspection_requests req ON req.id = ir.inspection_request_id
       JOIN components c ON c.id = req.component_id
@@ -35,7 +34,54 @@ export async function getLatestInspectionByComponentIdFromDatabase(componentId) 
     [componentId]
   );
 
-  return result.rows[0]?.raw_response || null;
+  return normalizeInspectionResultRow(result.rows[0]);
+}
+
+export async function getInspectionByTraceIdFromDatabase(traceId) {
+  const result = await query(
+    `
+      SELECT ir.trace_id, ir.raw_response, ir.created_at
+      FROM inspection_results ir
+      WHERE ir.trace_id = $1
+      LIMIT 1
+    `,
+    [traceId]
+  );
+
+  return normalizeInspectionResultRow(result.rows[0]);
+}
+
+export async function getLatestInspectionReportDataByComponentIdFromDatabase(componentId) {
+  const result = await query(
+    `
+      ${REPORT_DATA_SELECT}
+      FROM inspection_results ir
+      JOIN inspection_requests req ON req.id = ir.inspection_request_id
+      JOIN components c ON c.id = req.component_id
+      WHERE c.component_code = $1
+      ORDER BY ir.created_at DESC
+      LIMIT 1
+    `,
+    [componentId]
+  );
+
+  return normalizeReportDataRow(result.rows[0]);
+}
+
+export async function getInspectionReportDataByTraceIdFromDatabase(traceId) {
+  const result = await query(
+    `
+      ${REPORT_DATA_SELECT}
+      FROM inspection_results ir
+      JOIN inspection_requests req ON req.id = ir.inspection_request_id
+      JOIN components c ON c.id = req.component_id
+      WHERE ir.trace_id = $1
+      LIMIT 1
+    `,
+    [traceId]
+  );
+
+  return normalizeReportDataRow(result.rows[0]);
 }
 
 export async function saveInspectionToDatabase({ input, result, workflowMetadata = {} }) {
@@ -126,6 +172,7 @@ async function insertInspectionResult(client, inspectionRequestId, result) {
     `
       INSERT INTO inspection_results (
         inspection_request_id,
+        trace_id,
         source,
         overall_confidence,
         severity,
@@ -138,11 +185,12 @@ async function insertInspectionResult(client, inspectionRequestId, result) {
         raw_response,
         created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
       RETURNING id
     `,
     [
       inspectionRequestId,
+      result.trace_id,
       result.source,
       result.confidence_score,
       valueOrNull(result.severity_assessment?.severity),
@@ -236,7 +284,11 @@ async function insertNotifications(client, inspectionResultId, input, result) {
 
 async function insertNcrReport(client, inspectionResultId, result) {
   const reportText = result.notifications?.ncr_report || "NCR not required for current disposition.";
-  const requiresNcr = !reportText.toLowerCase().startsWith("ncr not required");
+  const requiresEscalation =
+    result.severity_assessment?.severity === "CRITICAL" ||
+    result.final_decision?.final_decision === "REJECT" ||
+    Boolean(result.final_decision?.human_override_required) ||
+    requiresContainment(result.final_decision);
 
   await client.query(
     `
@@ -251,10 +303,10 @@ async function insertNcrReport(client, inspectionResultId, result) {
     `,
     [
       inspectionResultId,
-      requiresNcr ? extractNcrNumber(reportText) : null,
+      extractNcrNumber(reportText),
       reportText,
       valueOrNull(result.notifications?.copq_estimate),
-      requiresNcr ? "OPEN" : "NOT_REQUIRED",
+      requiresEscalation ? "OPEN" : "GENERATED",
     ]
   );
 }
@@ -353,10 +405,95 @@ function extractNcrNumber(reportText) {
   return firstToken || null;
 }
 
+function requiresContainment(finalDecision = {}) {
+  const decisionText = [
+    finalDecision.line_action,
+    finalDecision.batch_action,
+    finalDecision.justification,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return /\b(stop|pause|hold|quarantine|contain|segregat|block|isolate|suspend|100%|one hundred)\b/.test(
+    decisionText
+  );
+}
+
 function valueOrNull(value) {
   if (value === undefined || value === null || value === "") {
     return null;
   }
 
   return value;
+}
+
+const REPORT_DATA_SELECT = `
+  SELECT
+    ir.trace_id,
+    c.component_code,
+    c.material AS component_material,
+    c.supplier AS component_supplier,
+    req.inspection_station,
+    req.line_id,
+    req.image_url,
+    req.image_storage_provider,
+    req.image_s3_bucket,
+    req.image_s3_key,
+    req.image_s3_uri,
+    req.image_file_name,
+    req.image_media_type,
+    req.inspection_timestamp,
+    req.metadata,
+    ir.raw_response,
+    ir.created_at
+`;
+
+function normalizeInspectionResultRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    ...row.raw_response,
+    trace_id: row.raw_response?.trace_id || row.trace_id,
+    created_at: row.raw_response?.created_at || row.created_at,
+  };
+}
+
+function normalizeReportDataRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  const metadata = row.metadata || {};
+
+  return {
+    request: {
+      component_id: row.component_code,
+      image_url: row.image_s3_uri || row.image_url || "",
+      image_storage_provider: row.image_storage_provider,
+      image_s3_bucket: row.image_s3_bucket,
+      image_s3_key: row.image_s3_key,
+      image_s3_uri: row.image_s3_uri,
+      image_file_name: row.image_file_name,
+      image_media_type: row.image_media_type,
+      inspection_station: row.inspection_station,
+      timestamp: row.inspection_timestamp,
+      line_id: row.line_id,
+      metadata: {
+        material: metadata.material || row.component_material || "",
+        supplier: metadata.supplier || row.component_supplier || "",
+        batch_number: metadata.batch_number || "",
+        dimensions: metadata.dimensions || "",
+        tolerance_range: metadata.tolerance_range || "",
+        notes: metadata.notes || "",
+      },
+    },
+    result: {
+      ...row.raw_response,
+      trace_id: row.raw_response?.trace_id || row.trace_id,
+      created_at: row.raw_response?.created_at || row.created_at,
+    },
+  };
 }

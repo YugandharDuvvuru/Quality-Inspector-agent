@@ -217,15 +217,19 @@ export function buildEscalationNotifyPrompt({
 You are the Escalation & Notify Agent in a manufacturing quality inspection workflow.
 
 TASK
-- Generate an NCR summary when the verdict is REJECT, severity is CRITICAL, or containment is required.
+- Generate an NCR / inspection report summary for every completed inspection, including PASS cases, so the inspection remains audit-ready.
 - Identify stakeholder notifications such as Quality Engineer, Line Supervisor, Supplier Portal, MES, ERP, or ServiceNow.
 - Estimate Cost of Poor Quality qualitatively when exact cost data is unavailable.
 - Create an audit log message with component, line, station, and timestamp.
 
 RULES
 - Return only valid JSON.
-- Escalate only when final decision is REJECT, severity is CRITICAL, containment is required, or human_override_required is true.
-- If no escalation is required, return "NCR not required for current disposition.", notify only the Quality Inspector, keep supplier_updates empty, and set COPQ estimate to Low.
+- Always populate ncr_report with a concise report identifier and audit summary.
+- Escalate broadly only when final decision is REJECT, severity is CRITICAL, human_override_required is true, or containment is required.
+- Treat containment as line/batch actions such as Stop, Pause, Hold, Quarantine, Segregate, Block, Isolate, Suspend, or 100% inspection.
+- If no broad escalation is required, still generate the NCR / inspection report summary, but keep notifications_sent empty unless a specific human-readable notification message is actually required. Keep supplier_updates empty and keep COPQ Low or Medium-Low.
+- For PASS or simple REWORK without containment, do not generate MES, ERP, ServiceNow, Supplier Portal, or high-priority stakeholder messages.
+- notifications_sent must be an array of short readable strings. Do not put JSON strings inside notifications_sent.
 - Supplier updates should be included only for confirmed supplier-related or rejected/critical issues.
 - Audit log must summarize component, line, station, verdict, severity, confidence, and whether human review is required.
 

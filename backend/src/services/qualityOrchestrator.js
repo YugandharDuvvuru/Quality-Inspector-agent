@@ -1,7 +1,11 @@
+import { randomUUID } from "crypto";
 import { env } from "../config/env.js";
 import { isDatabaseReady } from "../db/connection.js";
 import {
+  getInspectionByTraceIdFromDatabase,
   getLatestInspectionByComponentIdFromDatabase,
+  getLatestInspectionReportDataByComponentIdFromDatabase,
+  getInspectionReportDataByTraceIdFromDatabase,
   listLatestInspectionsFromDatabase,
   saveInspectionToDatabase,
 } from "../repositories/inspectionRepository.js";
@@ -46,6 +50,54 @@ export async function getInspectionByComponentId(componentId) {
   }
 }
 
+export async function getInspectionByTraceId(traceId) {
+  if (!isDatabaseReady()) {
+    console.warn(`[database] inspection lookup requested for trace=${traceId} while Postgres is not ready`);
+    return null;
+  }
+
+  try {
+    return await getInspectionByTraceIdFromDatabase(traceId);
+  } catch (error) {
+    console.error(`[database] failed to load inspection for trace=${traceId}. reason=${error.message}`);
+    return null;
+  }
+}
+
+export async function getInspectionReportDataByComponentId(componentId) {
+  if (!isDatabaseReady()) {
+    console.warn(
+      `[database] inspection report requested for component=${componentId} while Postgres is not ready`
+    );
+    return null;
+  }
+
+  try {
+    return await getLatestInspectionReportDataByComponentIdFromDatabase(componentId);
+  } catch (error) {
+    console.error(
+      `[database] failed to load inspection report data for component=${componentId}. reason=${error.message}`
+    );
+    return null;
+  }
+}
+
+export async function getInspectionReportDataByTraceId(traceId) {
+  if (!isDatabaseReady()) {
+    console.warn(`[database] inspection report requested for trace=${traceId} while Postgres is not ready`);
+    return null;
+  }
+
+  try {
+    return await getInspectionReportDataByTraceIdFromDatabase(traceId);
+  } catch (error) {
+    console.error(
+      `[database] failed to load inspection report data for trace=${traceId}. reason=${error.message}`
+    );
+    return null;
+  }
+}
+
 export async function runInspection(input) {
   const preparedInput = await prepareInspectionImageInput(input);
 
@@ -65,6 +117,7 @@ export async function runInspection(input) {
 
   const storedResult = {
     ...result,
+    trace_id: randomUUID(),
     created_at: new Date().toISOString(),
     agentic_loop: ["PERCEIVE", "PLAN", "ACT", "EVALUATE"],
     enterprise_integrations: enterpriseIntegrations,
