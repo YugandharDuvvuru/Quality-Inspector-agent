@@ -117,6 +117,9 @@ const parseS3Prefix = (value) => {
 
 const s3InputPrefix = parseS3Prefix(process.env.QI_S3_INPUT_PREFIX);
 const s3AuditPrefix = parseS3Prefix(process.env.QI_S3_AUDIT_PREFIX);
+const databaseUrl = toText(process.env.DATABASE_URL || process.env.QI_DATABASE_URL);
+const databaseEnabled =
+  process.env.DATABASE_ENABLED === undefined ? Boolean(databaseUrl) : toBoolean(process.env.DATABASE_ENABLED);
 
 export const env = {
   ENV_FILE_PATH: envFilePath,
@@ -127,10 +130,14 @@ export const env = {
   AWS_REGION: process.env.AWS_REGION || "us-east-1",
   BEDROCK_MODEL_ID:
     process.env.BEDROCK_MODEL_ID || "anthropic.claude-3-5-sonnet-20240620-v1:0",
-  DATABASE_ENABLED: toBoolean(process.env.DATABASE_ENABLED),
-  DATABASE_URL: process.env.DATABASE_URL?.trim() || "",
+  DATABASE_ENABLED: databaseEnabled,
+  DATABASE_URL: databaseUrl,
   DATABASE_SSL: toBoolean(process.env.DATABASE_SSL),
   DATABASE_AUTO_MIGRATE: toBoolean(process.env.DATABASE_AUTO_MIGRATE, true),
+  AUTH_SESSION_TTL_HOURS: toNumber(process.env.AUTH_SESSION_TTL_HOURS, 8),
+  AUTH_COOKIE_NAME: toText(process.env.AUTH_COOKIE_NAME, "quality_inspector_session"),
+  AUTH_COOKIE_SECURE: toBoolean(process.env.AUTH_COOKIE_SECURE, process.env.NODE_ENV === "production"),
+  AUTH_COOKIE_SAME_SITE: toText(process.env.AUTH_COOKIE_SAME_SITE, "lax"),
   ENTERPRISE_INTEGRATIONS_ENABLED: toBoolean(process.env.ENTERPRISE_INTEGRATIONS_ENABLED),
   ENTERPRISE_INTEGRATION_TIMEOUT_MS: toNumber(
     process.env.ENTERPRISE_INTEGRATION_TIMEOUT_MS,

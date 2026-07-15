@@ -2,9 +2,16 @@ import { Router } from "express";
 import { z } from "zod";
 import {
   getInspectionByComponentId,
+  getInspectionByTraceId,
+  getInspectionReportDataByComponentId,
+  getInspectionReportDataByTraceId,
   listInspections,
   runInspection,
 } from "../services/qualityOrchestrator.js";
+import {
+  buildNcrReportFilename,
+  generateNcrReportPdf,
+} from "../services/pdfReportService.js";
 
 export const inspectionRouter = Router();
 
@@ -40,9 +47,65 @@ const inspectionSchema = z
 
 inspectionRouter.get("/", async (_req, res, next) => {
   try {
-    res.json({ inspections: await listInspections() });
+    return res.json({ inspections: await listInspections() });
   } catch (error) {
     next(error);
+  }
+});
+
+inspectionRouter.get("/trace/:traceId/report.pdf", async (req, res, next) => {
+  try {
+    const reportData = await getInspectionReportDataByTraceId(req.params.traceId);
+
+    if (!reportData) {
+      return res.status(404).json({ message: "Inspection report data not found" });
+    }
+
+    const pdfBuffer = generateNcrReportPdf(reportData);
+    const filename = buildNcrReportFilename(reportData);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+
+    return res.send(pdfBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+inspectionRouter.get("/trace/:traceId", async (req, res, next) => {
+  try {
+    const inspection = await getInspectionByTraceId(req.params.traceId);
+
+    if (!inspection) {
+      return res.status(404).json({ message: "Inspection not found" });
+    }
+
+    return res.json(inspection);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+inspectionRouter.get("/:componentId/report.pdf", async (req, res, next) => {
+  try {
+    const reportData = await getInspectionReportDataByComponentId(req.params.componentId);
+
+    if (!reportData) {
+      return res.status(404).json({ message: "Inspection report data not found" });
+    }
+
+    const pdfBuffer = generateNcrReportPdf(reportData);
+    const filename = buildNcrReportFilename(reportData);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+
+    return res.send(pdfBuffer);
+  } catch (error) {
+    return next(error);
   }
 });
 
