@@ -51,9 +51,9 @@ const deleteInspectionsSchema = z.object({
   trace_ids: z.array(z.string().trim().min(1)).min(1, "Select at least one inspection"),
 });
 
-inspectionRouter.get("/", async (_req, res, next) => {
+inspectionRouter.get("/", async (req, res, next) => {
   try {
-    return res.json({ inspections: await listInspections() });
+    return res.json({ inspections: await listInspections(req.user) });
   } catch (error) {
     next(error);
   }
@@ -81,7 +81,7 @@ inspectionRouter.delete("/", requireRole("ADMIN"), async (req, res, next) => {
 
 inspectionRouter.get("/trace/:traceId/report.pdf", async (req, res, next) => {
   try {
-    const reportData = await getInspectionReportDataByTraceId(req.params.traceId);
+    const reportData = await getInspectionReportDataByTraceId(req.params.traceId, req.user);
 
     if (!reportData) {
       return res.status(404).json({ message: "Inspection report data not found" });
@@ -102,7 +102,7 @@ inspectionRouter.get("/trace/:traceId/report.pdf", async (req, res, next) => {
 
 inspectionRouter.get("/trace/:traceId", async (req, res, next) => {
   try {
-    const inspection = await getInspectionByTraceId(req.params.traceId);
+    const inspection = await getInspectionByTraceId(req.params.traceId, req.user);
 
     if (!inspection) {
       return res.status(404).json({ message: "Inspection not found" });
@@ -116,7 +116,7 @@ inspectionRouter.get("/trace/:traceId", async (req, res, next) => {
 
 inspectionRouter.get("/:componentId/report.pdf", async (req, res, next) => {
   try {
-    const reportData = await getInspectionReportDataByComponentId(req.params.componentId);
+    const reportData = await getInspectionReportDataByComponentId(req.params.componentId, req.user);
 
     if (!reportData) {
       return res.status(404).json({ message: "Inspection report data not found" });
@@ -137,7 +137,7 @@ inspectionRouter.get("/:componentId/report.pdf", async (req, res, next) => {
 
 inspectionRouter.get("/:componentId", async (req, res, next) => {
   try {
-    const inspection = await getInspectionByComponentId(req.params.componentId);
+    const inspection = await getInspectionByComponentId(req.params.componentId, req.user);
 
     if (!inspection) {
       return res.status(404).json({ message: "Inspection not found" });
@@ -160,10 +160,13 @@ inspectionRouter.post("/", async (req, res, next) => {
       });
     }
 
-    const result = await runInspection({
-      ...parsed.data,
-      timestamp: parsed.data.timestamp || new Date().toISOString(),
-    });
+    const result = await runInspection(
+      {
+        ...parsed.data,
+        timestamp: parsed.data.timestamp || new Date().toISOString(),
+      },
+      req.user
+    );
 
     return res.status(201).json(result);
   } catch (error) {

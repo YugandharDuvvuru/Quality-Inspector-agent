@@ -1,6 +1,7 @@
 import { query, withTransaction } from "../db/connection.js";
 
-export async function listLatestInspectionsFromDatabase() {
+export async function listLatestInspectionsFromDatabase(viewer) {
+  const { whereClause, values } = buildViewerScope(viewer, "req");
   const result = await query(
     `
       SELECT
@@ -8,9 +9,12 @@ export async function listLatestInspectionsFromDatabase() {
         ir.raw_response,
         ir.created_at
       FROM inspection_results ir
+      JOIN inspection_requests req ON req.id = ir.inspection_request_id
+      ${whereClause}
       ORDER BY ir.created_at DESC
       LIMIT 100
-    `
+    `,
+    values
   );
 
   return result.rows.map((row) => ({
@@ -20,7 +24,8 @@ export async function listLatestInspectionsFromDatabase() {
   }));
 }
 
-export async function getLatestInspectionByComponentIdFromDatabase(componentId) {
+export async function getLatestInspectionByComponentIdFromDatabase(componentId, viewer) {
+  const { whereClause, values } = buildViewerScope(viewer, "req", [componentId]);
   const result = await query(
     `
       SELECT ir.trace_id, ir.raw_response, ir.created_at
@@ -28,30 +33,35 @@ export async function getLatestInspectionByComponentIdFromDatabase(componentId) 
       JOIN inspection_requests req ON req.id = ir.inspection_request_id
       JOIN components c ON c.id = req.component_id
       WHERE c.component_code = $1
+      ${whereClause ? `AND ${whereClause.replace(/^WHERE\s+/i, "")}` : ""}
       ORDER BY ir.created_at DESC
       LIMIT 1
     `,
-    [componentId]
+    values
   );
 
   return normalizeInspectionResultRow(result.rows[0]);
 }
 
-export async function getInspectionByTraceIdFromDatabase(traceId) {
+export async function getInspectionByTraceIdFromDatabase(traceId, viewer) {
+  const { whereClause, values } = buildViewerScope(viewer, "req", [traceId]);
   const result = await query(
     `
       SELECT ir.trace_id, ir.raw_response, ir.created_at
       FROM inspection_results ir
+      JOIN inspection_requests req ON req.id = ir.inspection_request_id
       WHERE ir.trace_id = $1
+      ${whereClause ? `AND ${whereClause.replace(/^WHERE\s+/i, "")}` : ""}
       LIMIT 1
     `,
-    [traceId]
+    values
   );
 
   return normalizeInspectionResultRow(result.rows[0]);
 }
 
-export async function getLatestInspectionReportDataByComponentIdFromDatabase(componentId) {
+export async function getLatestInspectionReportDataByComponentIdFromDatabase(componentId, viewer) {
+  const { whereClause, values } = buildViewerScope(viewer, "req", [componentId]);
   const result = await query(
     `
       ${REPORT_DATA_SELECT}
@@ -59,16 +69,18 @@ export async function getLatestInspectionReportDataByComponentIdFromDatabase(com
       JOIN inspection_requests req ON req.id = ir.inspection_request_id
       JOIN components c ON c.id = req.component_id
       WHERE c.component_code = $1
+      ${whereClause ? `AND ${whereClause.replace(/^WHERE\s+/i, "")}` : ""}
       ORDER BY ir.created_at DESC
       LIMIT 1
     `,
-    [componentId]
+    values
   );
 
   return normalizeReportDataRow(result.rows[0]);
 }
 
-export async function getInspectionReportDataByTraceIdFromDatabase(traceId) {
+export async function getInspectionReportDataByTraceIdFromDatabase(traceId, viewer) {
+  const { whereClause, values } = buildViewerScope(viewer, "req", [traceId]);
   const result = await query(
     `
       ${REPORT_DATA_SELECT}
@@ -76,9 +88,10 @@ export async function getInspectionReportDataByTraceIdFromDatabase(traceId) {
       JOIN inspection_requests req ON req.id = ir.inspection_request_id
       JOIN components c ON c.id = req.component_id
       WHERE ir.trace_id = $1
+      ${whereClause ? `AND ${whereClause.replace(/^WHERE\s+/i, "")}` : ""}
       LIMIT 1
     `,
-    [traceId]
+    values
   );
 
   return normalizeReportDataRow(result.rows[0]);
@@ -122,10 +135,10 @@ export async function deleteInspectionsByTraceIdsFromDatabase(traceIds) {
   });
 }
 
-export async function saveInspectionToDatabase({ input, result, workflowMetadata = {} }) {
+export async function saveInspectionToDatabase({ input, result, workflowMetadata = {}, createdByUserId = null }) {
   return withTransaction(async (client) => {
     const componentId = await upsertComponent(client, input);
-    const inspectionRequestId = await insertInspectionRequest(client, componentId, input);
+    const inspectionRequestId = await insertInspectionRequest(client, componentId, input, createdByUserId);
     const inspectionResultId = await insertInspectionResult(client, inspectionRequestId, result);
 
     await insertDefects(client, inspectionResultId, result);
@@ -166,11 +179,12 @@ async function upsertComponent(client, input) {
   return result.rows[0].id;
 }
 
-async function insertInspectionRequest(client, componentId, input) {
+async function insertInspectionRequest(client, componentId, input, createdByUserId) {
   const result = await client.query(
     `
       INSERT INTO inspection_requests (
         component_id,
+        created_by_user_id,
         inspection_station,
         line_id,
         image_url,
@@ -183,11 +197,12 @@ async function insertInspectionRequest(client, componentId, input) {
         inspection_timestamp,
         metadata
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
       RETURNING id
     `,
     [
       componentId,
+      valueOrNull(createdByUserId),
       input.inspection_station,
       input.line_id,
       valueOrNull(input.image_url),
@@ -456,6 +471,22 @@ function requiresContainment(finalDecision = {}) {
   return /\b(stop|pause|hold|quarantine|contain|segregat|block|isolate|suspend|100%|one hundred)\b/.test(
     decisionText
   );
+}
+
+function buildViewerScope(viewer, requestAlias, initialValues = []) {
+  const role = String(viewer?.role || "").toUpperCase();
+
+  if (role === "ADMIN") {
+    return {
+      whereClause: "",
+      values: initialValues,
+    };
+  }
+
+  return {
+    whereClause: `WHERE ${requestAlias}.created_by_user_id = $${initialValues.length + 1}`,
+    values: [...initialValues, viewer?.id],
+  };
 }
 
 function valueOrNull(value) {

@@ -19,21 +19,21 @@ import { prepareInspectionImageInput } from "./s3ImageService.js";
 
 const CONFIDENCE_THRESHOLD = 0.75;
 
-export async function listInspections() {
+export async function listInspections(viewer) {
   if (!isDatabaseReady()) {
     console.warn("[database] inspection history requested while Postgres is not ready");
     return [];
   }
 
   try {
-    return await listLatestInspectionsFromDatabase();
+    return await listLatestInspectionsFromDatabase(viewer);
   } catch (error) {
     console.error(`[database] failed to list inspections. reason=${error.message}`);
     return [];
   }
 }
 
-export async function getInspectionByComponentId(componentId) {
+export async function getInspectionByComponentId(componentId, viewer) {
   if (!isDatabaseReady()) {
     console.warn(
       `[database] inspection lookup requested for component=${componentId} while Postgres is not ready`
@@ -42,7 +42,7 @@ export async function getInspectionByComponentId(componentId) {
   }
 
   try {
-    return await getLatestInspectionByComponentIdFromDatabase(componentId);
+    return await getLatestInspectionByComponentIdFromDatabase(componentId, viewer);
   } catch (error) {
     console.error(
       `[database] failed to load inspection for component=${componentId}. reason=${error.message}`
@@ -51,21 +51,21 @@ export async function getInspectionByComponentId(componentId) {
   }
 }
 
-export async function getInspectionByTraceId(traceId) {
+export async function getInspectionByTraceId(traceId, viewer) {
   if (!isDatabaseReady()) {
     console.warn(`[database] inspection lookup requested for trace=${traceId} while Postgres is not ready`);
     return null;
   }
 
   try {
-    return await getInspectionByTraceIdFromDatabase(traceId);
+    return await getInspectionByTraceIdFromDatabase(traceId, viewer);
   } catch (error) {
     console.error(`[database] failed to load inspection for trace=${traceId}. reason=${error.message}`);
     return null;
   }
 }
 
-export async function getInspectionReportDataByComponentId(componentId) {
+export async function getInspectionReportDataByComponentId(componentId, viewer) {
   if (!isDatabaseReady()) {
     console.warn(
       `[database] inspection report requested for component=${componentId} while Postgres is not ready`
@@ -74,7 +74,7 @@ export async function getInspectionReportDataByComponentId(componentId) {
   }
 
   try {
-    return await getLatestInspectionReportDataByComponentIdFromDatabase(componentId);
+    return await getLatestInspectionReportDataByComponentIdFromDatabase(componentId, viewer);
   } catch (error) {
     console.error(
       `[database] failed to load inspection report data for component=${componentId}. reason=${error.message}`
@@ -83,14 +83,14 @@ export async function getInspectionReportDataByComponentId(componentId) {
   }
 }
 
-export async function getInspectionReportDataByTraceId(traceId) {
+export async function getInspectionReportDataByTraceId(traceId, viewer) {
   if (!isDatabaseReady()) {
     console.warn(`[database] inspection report requested for trace=${traceId} while Postgres is not ready`);
     return null;
   }
 
   try {
-    return await getInspectionReportDataByTraceIdFromDatabase(traceId);
+    return await getInspectionReportDataByTraceIdFromDatabase(traceId, viewer);
   } catch (error) {
     console.error(
       `[database] failed to load inspection report data for trace=${traceId}. reason=${error.message}`
@@ -114,7 +114,7 @@ export async function deleteInspectionsByTraceIds(traceIds) {
   }
 }
 
-export async function runInspection(input) {
+export async function runInspection(input, viewer) {
   const preparedInput = await prepareInspectionImageInput(input);
 
   console.log(
@@ -144,6 +144,7 @@ export async function runInspection(input) {
       await saveInspectionToDatabase({
         input: preparedInput,
         result: storedResult,
+        createdByUserId: viewer?.id,
         workflowMetadata: {
           ...workflowMetadata,
           enterpriseIntegrations,
