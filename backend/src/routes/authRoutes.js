@@ -15,6 +15,7 @@ const registerSchema = z.object({
     .max(20, "Mobile number is too long"),
   email: z.string().trim().email("Valid email is required"),
   password: z.string().min(8, "Password must be at least 8 characters"),
+  role: z.enum(["ADMIN", "VIEWER"]).optional().default("VIEWER"),
 });
 
 const loginSchema = z.object({

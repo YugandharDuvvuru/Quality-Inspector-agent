@@ -72,6 +72,13 @@ export async function fetchInspections() {
   return data.inspections;
 }
 
+export async function deleteInspections(traceIds) {
+  return requestJson("/api/inspections", {
+    method: "DELETE",
+    body: JSON.stringify({ trace_ids: traceIds }),
+  });
+}
+
 export async function fetchHealthStatus() {
   return requestJson("/api/health");
 }

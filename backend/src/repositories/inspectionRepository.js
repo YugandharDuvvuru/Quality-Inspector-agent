@@ -84,6 +84,44 @@ export async function getInspectionReportDataByTraceIdFromDatabase(traceId) {
   return normalizeReportDataRow(result.rows[0]);
 }
 
+export async function deleteInspectionsByTraceIdsFromDatabase(traceIds) {
+  if (!traceIds.length) {
+    return { deleted_count: 0, deleted_trace_ids: [] };
+  }
+
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `
+        DELETE FROM inspection_results
+        WHERE trace_id = ANY($1::text[])
+        RETURNING trace_id, inspection_request_id
+      `,
+      [traceIds]
+    );
+    const deletedRequestIds = result.rows.map((row) => row.inspection_request_id).filter(Boolean);
+
+    if (deletedRequestIds.length) {
+      await client.query(
+        `
+          DELETE FROM inspection_requests req
+          WHERE req.id = ANY($1::bigint[])
+            AND NOT EXISTS (
+              SELECT 1
+              FROM inspection_results ir
+              WHERE ir.inspection_request_id = req.id
+            )
+        `,
+        [deletedRequestIds]
+      );
+    }
+
+    return {
+      deleted_count: result.rowCount,
+      deleted_trace_ids: result.rows.map((row) => row.trace_id),
+    };
+  });
+}
+
 export async function saveInspectionToDatabase({ input, result, workflowMetadata = {} }) {
   return withTransaction(async (client) => {
     const componentId = await upsertComponent(client, input);

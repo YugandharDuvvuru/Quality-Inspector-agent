@@ -1,20 +1,21 @@
 import { query, withTransaction } from "../db/connection.js";
 
-export async function createUser({ fullName, mobile, email, passwordHash, passwordSalt }) {
+export async function createUser({ fullName, mobile, email, passwordHash, passwordSalt, role }) {
   const result = await query(
     `
       INSERT INTO app_users (
         full_name,
         mobile,
         email,
+        role,
         password_hash,
         password_salt,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, NOW())
-      RETURNING id, full_name, mobile, email, created_at
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      RETURNING id, full_name, mobile, email, role, created_at
     `,
-    [fullName, mobile, normalizeEmail(email), passwordHash, passwordSalt]
+    [fullName, mobile, normalizeEmail(email), normalizeRole(role), passwordHash, passwordSalt]
   );
 
   return mapUser(result.rows[0]);
@@ -23,7 +24,7 @@ export async function createUser({ fullName, mobile, email, passwordHash, passwo
 export async function findUserByEmail(email) {
   const result = await query(
     `
-      SELECT id, full_name, mobile, email, password_hash, password_salt, created_at
+      SELECT id, full_name, mobile, email, role, password_hash, password_salt, created_at
       FROM app_users
       WHERE email = $1
       LIMIT 1
@@ -58,6 +59,7 @@ export async function findActiveSessionByTokenHash(tokenHash) {
         u.full_name,
         u.mobile,
         u.email,
+        u.role,
         u.created_at
       FROM user_sessions s
       JOIN app_users u ON u.id = s.user_id
@@ -115,10 +117,16 @@ export function mapUser(row) {
     name: row.full_name,
     mobile: row.mobile,
     email: row.email,
+    role: row.role || "VIEWER",
     created_at: row.created_at,
   };
 }
 
 export function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
+}
+
+export function normalizeRole(role) {
+  const normalized = String(role || "VIEWER").trim().toUpperCase();
+  return normalized === "ADMIN" ? "ADMIN" : "VIEWER";
 }

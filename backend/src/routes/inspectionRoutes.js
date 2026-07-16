@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
+import { requireRole } from "../middleware/authMiddleware.js";
 import {
+  deleteInspectionsByTraceIds,
   getInspectionByComponentId,
   getInspectionByTraceId,
   getInspectionReportDataByComponentId,
@@ -45,11 +47,35 @@ const inspectionSchema = z
     path: ["image_media_type"],
   });
 
+const deleteInspectionsSchema = z.object({
+  trace_ids: z.array(z.string().trim().min(1)).min(1, "Select at least one inspection"),
+});
+
 inspectionRouter.get("/", async (_req, res, next) => {
   try {
     return res.json({ inspections: await listInspections() });
   } catch (error) {
     next(error);
+  }
+});
+
+inspectionRouter.delete("/", requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const parsed = deleteInspectionsSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Invalid delete payload",
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const uniqueTraceIds = Array.from(new Set(parsed.data.trace_ids));
+    const result = await deleteInspectionsByTraceIds(uniqueTraceIds);
+
+    return res.json(result);
+  } catch (error) {
+    return next(error);
   }
 });
 

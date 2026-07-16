@@ -114,6 +114,12 @@ button:disabled {
   font-weight: 900;
 }
 
+.user-chip span {
+  color: #c8d4e8;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
 .top-actions button,
 .logout-action,
 .icon-text-button,
@@ -168,12 +174,88 @@ button:disabled {
   padding: 32px 24px;
 }
 
+.top-page-note {
+  margin: 28px 20px 0;
+}
+
+.top-page-note .decision-note {
+  margin: 0;
+}
+
 .panel-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.history-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.decision-note {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid #d7e1ef;
+  border-left: 4px solid #2563eb;
+  border-radius: 7px;
+  background: #f8fbff;
+  color: #18315a;
+}
+
+.result-page > .decision-note {
+  margin-top: 18px;
+}
+
+.decision-note strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.decision-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.decision-note li {
+  margin: 4px 0;
+  line-height: 1.45;
+}
+
+.select-all-control,
+.row-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #5f718c;
+  font-weight: 900;
+}
+
+.select-all-control input,
+.row-checkbox input {
+  width: 22px;
+  height: 22px;
+  accent-color: #2563eb;
+}
+
+.delete-selected-button {
+  min-height: 44px;
+  padding: 10px 28px;
+  border: 1px solid #efb3b3;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #c44747;
+  font-weight: 900;
+}
+
+.delete-selected-button:disabled {
+  color: #c97373;
 }
 
 .history-table {
@@ -201,6 +283,17 @@ button:disabled {
   border: 1px solid #d5dfec;
   border-radius: 10px;
   background: #fafcff;
+}
+
+.history-row-admin {
+  grid-template-columns:
+    minmax(0, 1.35fr)
+    minmax(115px, 0.75fr)
+    minmax(145px, 0.86fr)
+    minmax(105px, 0.62fr)
+    minmax(105px, 0.62fr)
+    minmax(74px, 0.36fr)
+    minmax(58px, 0.26fr);
 }
 
 .history-row > * {
@@ -359,7 +452,8 @@ button:disabled {
 }
 
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   width: 100%;
   min-height: 38px;
   padding: 9px 10px;
@@ -682,6 +776,17 @@ button:disabled {
     gap: 10px;
     padding-left: 14px;
     padding-right: 14px;
+  }
+
+  .history-row-admin {
+    grid-template-columns:
+      minmax(0, 1.25fr)
+      minmax(100px, 0.72fr)
+      minmax(130px, 0.85fr)
+      minmax(92px, 0.6fr)
+      minmax(92px, 0.6fr)
+      minmax(64px, 0.36fr)
+      minmax(50px, 0.24fr);
   }
 
   .agent-grid {

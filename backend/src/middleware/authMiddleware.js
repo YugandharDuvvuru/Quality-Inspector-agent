@@ -19,6 +19,22 @@ export async function requireAuth(req, _res, next) {
   }
 }
 
+export function requireRole(...allowedRoles) {
+  const normalizedRoles = allowedRoles.map((role) => String(role).trim().toUpperCase());
+
+  return (req, _res, next) => {
+    const userRole = String(req.user?.role || "").trim().toUpperCase();
+
+    if (!normalizedRoles.includes(userRole)) {
+      const error = new Error("You do not have permission to perform this action");
+      error.statusCode = 403;
+      return next(error);
+    }
+
+    return next();
+  };
+}
+
 export function extractAuthToken(req) {
   return extractSessionCookie(req) || extractBearerToken(req);
 }
