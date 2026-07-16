@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  deleteInspections,
   downloadInspectionReport,
   fetchCurrentUser,
   fetchInspectionByTrace,
@@ -68,6 +69,7 @@ export function App() {
     mobile: "",
     email: "",
     password: "",
+    role: "VIEWER",
   });
   const [authError, setAuthError] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -79,6 +81,8 @@ export function App() {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isInspectionRunning, setIsInspectionRunning] = useState(false);
   const [isReportDownloading, setIsReportDownloading] = useState(false);
+  const [isDeletingInspections, setIsDeletingInspections] = useState(false);
+  const [selectedTraceIds, setSelectedTraceIds] = useState([]);
   const [error, setError] = useState("");
   const [fileInputKey] = useState(0);
   const activeInspectionController = useRef(null);
@@ -119,6 +123,17 @@ export function App() {
     () => buildWorkflowSteps({ isInspectionRunning, result: currentResult }),
     [isInspectionRunning, currentResult]
   );
+  const isAdmin = session?.user?.role === "ADMIN";
+
+  useEffect(() => {
+    const availableTraceIds = new Set(
+      inspections.map((inspection) => inspection.trace_id).filter(Boolean)
+    );
+
+    setSelectedTraceIds((current) =>
+      current.filter((traceId) => availableTraceIds.has(traceId))
+    );
+  }, [inspections]);
 
   async function loadInspectionHistory(options = {}) {
     if (!session && !isSessionChecking && !options.silent) {
@@ -173,6 +188,7 @@ export function App() {
               mobile: authForm.mobile,
               email: authForm.email,
               password: authForm.password,
+              role: authForm.role,
             }
           : {
               email: authForm.email,
@@ -184,7 +200,7 @@ export function App() {
           : await loginAccount(authPayload);
 
       setSession(nextSession);
-      setAuthForm({ name: "", mobile: "", email: "", password: "" });
+      setAuthForm({ name: "", mobile: "", email: "", password: "", role: "VIEWER" });
       setView("dashboard");
       await loadInspectionHistory({ silent: true });
     } catch (requestError) {
@@ -197,6 +213,7 @@ export function App() {
   async function handleLogout() {
     setSession(null);
     setInspections([]);
+    setSelectedTraceIds([]);
     setSelectedInspection(null);
     setCurrentResult(null);
 
@@ -357,6 +374,60 @@ export function App() {
     }
   }
 
+  function toggleInspectionSelection(traceId) {
+    if (!traceId) {
+      return;
+    }
+
+    setSelectedTraceIds((current) =>
+      current.includes(traceId)
+        ? current.filter((selectedTraceId) => selectedTraceId !== traceId)
+        : [...current, traceId]
+    );
+  }
+
+  function toggleAllInspectionSelection() {
+    const traceIds = inspections.map((inspection) => inspection.trace_id).filter(Boolean);
+    const allSelected =
+      traceIds.length > 0 && traceIds.every((traceId) => selectedTraceIds.includes(traceId));
+
+    setSelectedTraceIds(allSelected ? [] : traceIds);
+  }
+
+  async function handleDeleteSelectedInspections() {
+    if (!isAdmin || selectedTraceIds.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${selectedTraceIds.length} selected inspection record${selectedTraceIds.length === 1 ? "" : "s"}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const traceIdsToDelete = [...selectedTraceIds];
+    setIsDeletingInspections(true);
+    setError("");
+
+    try {
+      await deleteInspections(traceIdsToDelete);
+      setSelectedTraceIds([]);
+
+      if (selectedInspection?.trace_id && traceIdsToDelete.includes(selectedInspection.trace_id)) {
+        setSelectedInspection(null);
+        setCurrentResult(null);
+      }
+
+      await loadInspectionHistory({ silent: true });
+    } catch (requestError) {
+      handleRequestError(requestError);
+    } finally {
+      setIsDeletingInspections(false);
+    }
+  }
+
   function startNewInspection() {
     setView("new");
     setCurrentResult(null);
@@ -411,8 +482,14 @@ export function App() {
         <DashboardView
           inspections={inspections}
           isLoading={isHistoryLoading}
+          isAdmin={isAdmin}
+          isDeleting={isDeletingInspections}
+          selectedTraceIds={selectedTraceIds}
           onRefresh={() => loadInspectionHistory()}
           onOpen={handleOpenInspection}
+          onToggleTrace={toggleInspectionSelection}
+          onToggleAll={toggleAllInspectionSelection}
+          onDeleteSelected={handleDeleteSelectedInspections}
         />
       ) : null}
 
@@ -447,6 +524,7 @@ export function App() {
 function TopBar({ view, user, onDashboard, onNewInspection, onLogout }) {
   const isDetailView = view === "detail";
   const displayName = user?.name || user?.email || "Signed in";
+  const roleLabel = user?.role === "ADMIN" ? "Admin" : "Viewer";
 
   return (
     <header className={`top-bar ${isDetailView ? "detail-mode" : ""}`}>
@@ -463,6 +541,7 @@ function TopBar({ view, user, onDashboard, onNewInspection, onLogout }) {
         <span className="user-chip">
           <UserRound size={18} />
           <strong>{displayName}</strong>
+          <span>{roleLabel}</span>
         </span>
         <nav className="top-actions" aria-label="Primary navigation">
           <button className={view === "dashboard" ? "active" : ""} type="button" onClick={onDashboard}>
@@ -482,50 +561,110 @@ function TopBar({ view, user, onDashboard, onNewInspection, onLogout }) {
   );
 }
 
-function DashboardView({ inspections, isLoading, onRefresh, onOpen }) {
+function DashboardView({
+  inspections,
+  isLoading,
+  isAdmin,
+  isDeleting,
+  selectedTraceIds,
+  onRefresh,
+  onOpen,
+  onToggleTrace,
+  onToggleAll,
+  onDeleteSelected,
+}) {
+  const selectableTraceIds = inspections.map((inspection) => inspection.trace_id).filter(Boolean);
+  const allSelected =
+    selectableTraceIds.length > 0 &&
+    selectableTraceIds.every((traceId) => selectedTraceIds.includes(traceId));
+
   return (
-    <section className="page-panel history-panel">
-      <div className="panel-toolbar">
-        <div>
-          <p className="eyebrow">Inspection History</p>
-          <h2>Previous Inspections</h2>
-        </div>
-        <button className="icon-text-button" type="button" onClick={onRefresh} disabled={isLoading}>
-          <RefreshCw className={isLoading ? "spin" : ""} size={16} />
-          Refresh
-        </button>
+    <>
+      <div className="top-page-note">
+        <VerdictSeverityNote />
       </div>
 
-      <div className="history-table" role="table" aria-label="Inspection history">
-        <div className="history-row history-head" role="row">
-          <span>TraceID</span>
-          <span>Component</span>
-          <span>Status</span>
-          <span>Verdict</span>
-          <span>Severity</span>
-          <span>Result</span>
-        </div>
-
-        {inspections.length ? (
-          inspections.map((inspection) => (
-            <div className="history-row" role="row" key={inspection.trace_id || inspection.created_at}>
-              <strong>{inspection.trace_id || "Trace unavailable"}</strong>
-              <strong>{inspection.component_id || "-"}</strong>
-              <StatusPill value={getInspectionStatus(inspection)} />
-              <StatusPill value={inspection.final_decision?.final_decision || "-"} />
-              <StatusPill value={inspection.severity_assessment?.severity || "-"} />
-              <button className="open-link" type="button" onClick={() => onOpen(inspection)}>
-                Open
-              </button>
-            </div>
-          ))
-        ) : (
-          <div className="empty-history">
-            {isLoading ? "Loading inspection history..." : "No inspections are available yet."}
+      <section className="page-panel history-panel">
+        <div className="panel-toolbar">
+          <div>
+            <p className="eyebrow">Inspection History</p>
+            <h2>Previous Inspections</h2>
           </div>
-        )}
-      </div>
-    </section>
+          <div className="history-actions">
+            {isAdmin ? (
+              <>
+                <label className="select-all-control">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={onToggleAll}
+                    disabled={!selectableTraceIds.length || isDeleting}
+                  />
+                  <span>Select all</span>
+                </label>
+                <button
+                  className="delete-selected-button"
+                  type="button"
+                  onClick={onDeleteSelected}
+                  disabled={!selectedTraceIds.length || isDeleting}
+                >
+                  {isDeleting ? "Deleting" : "Delete Selected"}
+                </button>
+              </>
+            ) : null}
+            <button className="icon-text-button" type="button" onClick={onRefresh} disabled={isLoading}>
+              <RefreshCw className={isLoading ? "spin" : ""} size={16} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div className="history-table" role="table" aria-label="Inspection history">
+          <div className={`history-row history-head ${isAdmin ? "history-row-admin" : ""}`} role="row">
+            <span>TraceID</span>
+            <span>Component</span>
+            <span>Status</span>
+            <span>Verdict</span>
+            <span>Severity</span>
+            <span>Result</span>
+            {isAdmin ? <span>Delete</span> : null}
+          </div>
+
+          {inspections.length ? (
+            inspections.map((inspection) => (
+              <div
+                className={`history-row ${isAdmin ? "history-row-admin" : ""}`}
+                role="row"
+                key={inspection.trace_id || inspection.created_at}
+              >
+                <strong>{inspection.trace_id || "Trace unavailable"}</strong>
+                <strong>{inspection.component_id || "-"}</strong>
+                <StatusPill value={getInspectionStatus(inspection)} />
+                <StatusPill value={inspection.final_decision?.final_decision || "-"} />
+                <StatusPill value={inspection.severity_assessment?.severity || "-"} />
+                <button className="open-link" type="button" onClick={() => onOpen(inspection)}>
+                  Open
+                </button>
+                {isAdmin ? (
+                  <label className="row-checkbox" aria-label={`Select inspection ${inspection.trace_id}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTraceIds.includes(inspection.trace_id)}
+                      onChange={() => onToggleTrace(inspection.trace_id)}
+                      disabled={!inspection.trace_id || isDeleting}
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <div className="empty-history">
+              {isLoading ? "Loading inspection history..." : "No inspections are available yet."}
+            </div>
+          )}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -715,6 +854,8 @@ function DetailView({ inspection, isReportDownloading, onBack, onDownloadReport 
         Back to Dashboard
       </button>
 
+      <VerdictSeverityNote />
+
       <div className="result-grid">
         <section className="result-card">
           <div className="card-heading">
@@ -875,6 +1016,13 @@ function AuthScreen({ mode, form, error, isLoading, onModeChange, onFieldChange,
             <>
               <Input label="Name" name="name" value={form.name} onChange={onFieldChange} required />
               <Input label="Mobile" name="mobile" value={form.mobile} onChange={onFieldChange} required />
+              <label className="field">
+                <span>Role</span>
+                <select name="role" value={form.role} onChange={onFieldChange}>
+                  <option value="VIEWER">Viewer</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </label>
             </>
           ) : null}
           <Input label="Email" name="email" type="email" value={form.email} onChange={onFieldChange} required />
@@ -930,6 +1078,19 @@ function Definition({ label, value }) {
 function StatusPill({ value }) {
   const tone = getStatusTone(value);
   return <span className={`status-pill ${tone}`}>{value}</span>;
+}
+
+function VerdictSeverityNote() {
+  return (
+    <div className="decision-note">
+      <strong>How Verdict and Severity are determined</strong>
+      <ul>
+        <li>Verdict and severity are decided by the agent workflow using detected defects, defect location, severity rules, and IATF 16949 / ISO 9001 quality context.</li>
+        <li>Confidence score does not directly decide PASS / REWORK / REJECT; confidence controls whether human review is required.</li>
+        <li>Confidence at or above {formatPercent(HUMAN_REVIEW_THRESHOLD)} can proceed without manual review; below {formatPercent(HUMAN_REVIEW_THRESHOLD)} requires human review.</li>
+      </ul>
+    </div>
+  );
 }
 
 function normalizeNotificationForDisplay(item) {

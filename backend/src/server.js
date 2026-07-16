@@ -20,6 +20,7 @@ const routeCatalog = [
   { method: "GET", path: "/api/auth/me", purpose: "Get the authenticated user profile" },
   { method: "POST", path: "/api/auth/logout", purpose: "Revoke the active user session" },
   { method: "GET", path: "/api/inspections", purpose: "List persisted inspection history" },
+  { method: "DELETE", path: "/api/inspections", purpose: "Delete selected inspections (admin only)" },
   { method: "GET", path: "/api/inspections/trace/:traceId", purpose: "Get one inspection by trace ID" },
   { method: "GET", path: "/api/inspections/trace/:traceId/report.pdf", purpose: "Download NCR PDF by trace ID" },
   { method: "GET", path: "/api/inspections/:componentId", purpose: "Get latest inspection for one component" },

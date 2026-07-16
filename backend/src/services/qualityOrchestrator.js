@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { env } from "../config/env.js";
 import { isDatabaseReady } from "../db/connection.js";
 import {
+  deleteInspectionsByTraceIdsFromDatabase,
   getInspectionByTraceIdFromDatabase,
   getLatestInspectionByComponentIdFromDatabase,
   getLatestInspectionReportDataByComponentIdFromDatabase,
@@ -95,6 +96,21 @@ export async function getInspectionReportDataByTraceId(traceId) {
       `[database] failed to load inspection report data for trace=${traceId}. reason=${error.message}`
     );
     return null;
+  }
+}
+
+export async function deleteInspectionsByTraceIds(traceIds) {
+  if (!isDatabaseReady()) {
+    const error = new Error("Inspection database is not ready");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  try {
+    return await deleteInspectionsByTraceIdsFromDatabase(traceIds);
+  } catch (error) {
+    console.error(`[database] failed to delete inspections. reason=${error.message}`);
+    throw error;
   }
 }
 

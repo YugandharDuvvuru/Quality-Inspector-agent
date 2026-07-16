@@ -6,6 +6,7 @@ import {
   findActiveSessionByTokenHash,
   findUserByEmail,
   normalizeEmail,
+  normalizeRole,
   pruneExpiredSessionsForUser,
   revokeSessionByTokenHash,
 } from "../repositories/userRepository.js";
@@ -14,7 +15,7 @@ import { env } from "../config/env.js";
 const PASSWORD_KEY_LENGTH = 64;
 const PASSWORD_SCRYPT_COST = 16384;
 
-export async function registerUser({ name, mobile, email, password }) {
+export async function registerUser({ name, mobile, email, password, role }) {
   ensureAuthDatabaseReady();
 
   const normalizedEmail = normalizeEmail(email);
@@ -32,6 +33,7 @@ export async function registerUser({ name, mobile, email, password }) {
     fullName: name.trim(),
     mobile: mobile.trim(),
     email: normalizedEmail,
+    role: normalizeRole(role),
     passwordHash,
     passwordSalt,
   });
@@ -69,6 +71,7 @@ export async function loginUser({ email, password }) {
       name: userRecord.full_name,
       mobile: userRecord.mobile,
       email: userRecord.email,
+      role: userRecord.role || "VIEWER",
       created_at: userRecord.created_at,
     },
     token: session.token,
