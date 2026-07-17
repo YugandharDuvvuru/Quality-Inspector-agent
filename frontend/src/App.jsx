@@ -22,6 +22,7 @@ import {
 } from "./api.js";
 
 const HUMAN_REVIEW_THRESHOLD = 0.75;
+const DASHBOARD_REDIRECT_DELAY_SECONDS = 10;
 
 const blankForm = {
   component_id: "",
@@ -86,6 +87,7 @@ export function App() {
   const [workflowStageStatuses, setWorkflowStageStatuses] = useState(() =>
     createWorkflowStageStatuses()
   );
+  const [dashboardRedirectCountdown, setDashboardRedirectCountdown] = useState(null);
   const [error, setError] = useState("");
   const [fileInputKey] = useState(0);
   const activeInspectionController = useRef(null);
@@ -131,6 +133,30 @@ export function App() {
     [workflowStageStatuses, currentResult]
   );
   const isAdmin = session?.user?.role === "ADMIN";
+
+  useEffect(() => {
+    if (
+      view !== "new" ||
+      !currentResult ||
+      isInspectionRunning ||
+      dashboardRedirectCountdown === null
+    ) {
+      return undefined;
+    }
+
+    if (dashboardRedirectCountdown <= 0) {
+      goToDashboard();
+      return undefined;
+    }
+
+    const redirectTimer = window.setTimeout(() => {
+      setDashboardRedirectCountdown((currentCountdown) =>
+        currentCountdown === null ? null : currentCountdown - 1
+      );
+    }, 1000);
+
+    return () => window.clearTimeout(redirectTimer);
+  }, [view, currentResult, isInspectionRunning, dashboardRedirectCountdown]);
 
   useEffect(() => {
     const availableTraceIds = new Set(
@@ -224,6 +250,7 @@ export function App() {
     setSelectedInspection(null);
     setCurrentResult(null);
     setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
 
     try {
       await logoutAccount();
@@ -271,6 +298,7 @@ export function App() {
     event.preventDefault();
     setIsInspectionRunning(true);
     setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     setCurrentResult(null);
     setError("");
 
@@ -313,6 +341,7 @@ export function App() {
       setCurrentResult(inspection);
       setSelectedInspection(inspection);
       setWorkflowStageStatuses(createWorkflowStageStatuses("completed"));
+      setDashboardRedirectCountdown(DASHBOARD_REDIRECT_DELAY_SECONDS);
       await loadInspectionHistory({ silent: true });
     } catch (requestError) {
       if (requestError.name === "AbortError") {
@@ -326,6 +355,7 @@ export function App() {
       setIsInspectionRunning(false);
       if (!didCompleteInspection) {
         setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+        setDashboardRedirectCountdown(null);
       }
     }
   }
@@ -354,6 +384,7 @@ export function App() {
     setCurrentResult(null);
     setSelectedInspection(null);
     setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     setError("");
   }
 
@@ -365,6 +396,7 @@ export function App() {
         ? await fetchInspectionByTrace(inspection.trace_id)
         : inspection;
 
+      setDashboardRedirectCountdown(null);
       setSelectedInspection(detail);
       setCurrentResult(detail);
       setView("detail");
@@ -469,6 +501,7 @@ export function App() {
     setCurrentResult(null);
     setSelectedInspection(null);
     setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     setError("");
   }
 
@@ -476,6 +509,7 @@ export function App() {
     setView("dashboard");
     setSelectedInspection(null);
     setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     loadInspectionHistory({ silent: true });
   }
 
@@ -539,6 +573,7 @@ export function App() {
           result={currentResult}
           isRunning={isInspectionRunning}
           isReportDownloading={isReportDownloading}
+          dashboardRedirectCountdown={dashboardRedirectCountdown}
           onFieldChange={updateField}
           onImageUpload={handleImageUpload}
           onSubmit={handleSubmit}
@@ -712,6 +747,7 @@ function NewInspectionView({
   result,
   isRunning,
   isReportDownloading,
+  dashboardRedirectCountdown,
   onFieldChange,
   onImageUpload,
   onSubmit,
@@ -736,6 +772,12 @@ function NewInspectionView({
             <StatusPill value={result.final_decision?.final_decision || "-"} />
             <StatusPill value={result.severity_assessment?.severity || "-"} />
             <span>{formatPercent(result.confidence_score)} confidence</span>
+            {dashboardRedirectCountdown !== null ? (
+              <span>
+                Dashboard opens in {dashboardRedirectCountdown}{" "}
+                {dashboardRedirectCountdown === 1 ? "second" : "seconds"}
+              </span>
+            ) : null}
           </div>
         ) : null}
       </section>
