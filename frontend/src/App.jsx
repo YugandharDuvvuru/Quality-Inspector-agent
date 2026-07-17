@@ -70,7 +70,6 @@ export function App() {
     mobile: "",
     email: "",
     password: "",
-    role: "VIEWER",
   });
   const [authError, setAuthError] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -221,7 +220,6 @@ export function App() {
               mobile: authForm.mobile,
               email: authForm.email,
               password: authForm.password,
-              role: authForm.role,
             }
           : {
               email: authForm.email,
@@ -233,7 +231,7 @@ export function App() {
           : await loginAccount(authPayload);
 
       setSession(nextSession);
-      setAuthForm({ name: "", mobile: "", email: "", password: "", role: "VIEWER" });
+      setAuthForm({ name: "", mobile: "", email: "", password: "" });
       setView("dashboard");
       await loadInspectionHistory({ silent: true });
     } catch (requestError) {
@@ -1088,13 +1086,6 @@ function AuthScreen({ mode, form, error, isLoading, onModeChange, onFieldChange,
             <>
               <Input label="Name" name="name" value={form.name} onChange={onFieldChange} required />
               <Input label="Mobile" name="mobile" value={form.mobile} onChange={onFieldChange} required />
-              <label className="field">
-                <span>Role</span>
-                <select name="role" value={form.role} onChange={onFieldChange}>
-                  <option value="VIEWER">Viewer</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-              </label>
             </>
           ) : null}
           <Input label="Email" name="email" type="email" value={form.email} onChange={onFieldChange} required />
