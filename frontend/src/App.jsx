@@ -513,7 +513,6 @@ export function App() {
         <DetailView
           inspection={selectedInspection}
           isReportDownloading={isReportDownloading}
-          onBack={goToDashboard}
           onDownloadReport={() => handleDownloadReport(selectedInspection)}
         />
       ) : null}
@@ -830,13 +829,10 @@ function NewInspectionView({
   );
 }
 
-function DetailView({ inspection, isReportDownloading, onBack, onDownloadReport }) {
+function DetailView({ inspection, isReportDownloading, onDownloadReport }) {
   if (!inspection) {
     return (
       <section className="page-panel">
-        <button className="back-link" type="button" onClick={onBack}>
-          Back to Dashboard
-        </button>
         <p>No inspection selected.</p>
       </section>
     );
@@ -850,10 +846,6 @@ function DetailView({ inspection, isReportDownloading, onBack, onDownloadReport 
 
   return (
     <section className="result-page">
-      <button className="back-link" type="button" onClick={onBack}>
-        Back to Dashboard
-      </button>
-
       <VerdictSeverityNote />
 
       <div className="result-grid">
@@ -1081,15 +1073,53 @@ function StatusPill({ value }) {
 }
 
 function VerdictSeverityNote() {
+  const thresholdLabel = formatPercent(HUMAN_REVIEW_THRESHOLD);
+  const guideItems = [
+    {
+      tone: "confidence",
+      title: "Confidence Score",
+      copy: "Used with severity and defect evidence to support the verdict; unclear image quality limits confidence to 50%.",
+    },
+    {
+      tone: "pass",
+      title: "PASS",
+      copy: `Needs at least ${thresholdLabel} confidence, severity NONE, and no visible defects.`,
+    },
+    {
+      tone: "rework",
+      title: "REWORK",
+      copy: `Needs at least ${thresholdLabel} confidence plus a repairable MINOR or MAJOR defect.`,
+    },
+    {
+      tone: "reject",
+      title: "REJECT",
+      copy: `Needs at least ${thresholdLabel} confidence plus CRITICAL severity or non-repairable defect evidence.`,
+    },
+    {
+      tone: "review",
+      title: "Human Review",
+      copy: `Scores below ${thresholdLabel} set workflow status to NEEDS_HUMAN_REVIEW while the verdict remains PASS, REWORK, or REJECT.`,
+    },
+  ];
+
   return (
-    <div className="decision-note">
-      <strong>How Verdict and Severity are determined</strong>
-      <ul>
-        <li>Verdict and severity are decided by the agent workflow using detected defects, defect location, severity rules, and IATF 16949 / ISO 9001 quality context.</li>
-        <li>Confidence score does not directly decide PASS / REWORK / REJECT; confidence controls whether human review is required.</li>
-        <li>Confidence at or above {formatPercent(HUMAN_REVIEW_THRESHOLD)} can proceed without manual review; below {formatPercent(HUMAN_REVIEW_THRESHOLD)} requires human review.</li>
-      </ul>
-    </div>
+    <section className="decision-note" aria-label="Verdict and severity guide">
+      <div className="decision-note-header">
+        <h2>Verdict and Severity Guide</h2>
+        <span className="review-threshold-badge">Review below {thresholdLabel}</span>
+      </div>
+      <p className="decision-note-summary">
+        There is no separate confidence cutoff for PASS, REWORK, and REJECT. Any automated verdict needs confidence at or above {thresholdLabel}; below that, the workflow is sent to human review.
+      </p>
+      <div className="decision-guide-grid">
+        {guideItems.map((item) => (
+          <article className={`decision-guide-card ${item.tone}`} key={item.title}>
+            <h3>{item.title}</h3>
+            <p>{item.copy}</p>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
