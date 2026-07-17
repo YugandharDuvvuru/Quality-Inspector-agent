@@ -18,10 +18,11 @@ import {
   loginAccount,
   logoutAccount,
   registerAccount,
-  submitInspection,
+  submitInspectionWithProgress,
 } from "./api.js";
 
 const HUMAN_REVIEW_THRESHOLD = 0.75;
+const DASHBOARD_REDIRECT_DELAY_SECONDS = 10;
 
 const blankForm = {
   component_id: "",
@@ -83,6 +84,10 @@ export function App() {
   const [isReportDownloading, setIsReportDownloading] = useState(false);
   const [isDeletingInspections, setIsDeletingInspections] = useState(false);
   const [selectedTraceIds, setSelectedTraceIds] = useState([]);
+  const [workflowStageStatuses, setWorkflowStageStatuses] = useState(() =>
+    createWorkflowStageStatuses()
+  );
+  const [dashboardRedirectCountdown, setDashboardRedirectCountdown] = useState(null);
   const [error, setError] = useState("");
   const [fileInputKey] = useState(0);
   const activeInspectionController = useRef(null);
@@ -120,10 +125,38 @@ export function App() {
   }, []);
 
   const workflowSteps = useMemo(
-    () => buildWorkflowSteps({ isInspectionRunning, result: currentResult }),
-    [isInspectionRunning, currentResult]
+    () =>
+      buildWorkflowSteps({
+        stageStatuses: workflowStageStatuses,
+        result: currentResult,
+      }),
+    [workflowStageStatuses, currentResult]
   );
   const isAdmin = session?.user?.role === "ADMIN";
+
+  useEffect(() => {
+    if (
+      view !== "new" ||
+      !currentResult ||
+      isInspectionRunning ||
+      dashboardRedirectCountdown === null
+    ) {
+      return undefined;
+    }
+
+    if (dashboardRedirectCountdown <= 0) {
+      goToDashboard();
+      return undefined;
+    }
+
+    const redirectTimer = window.setTimeout(() => {
+      setDashboardRedirectCountdown((currentCountdown) =>
+        currentCountdown === null ? null : currentCountdown - 1
+      );
+    }, 1000);
+
+    return () => window.clearTimeout(redirectTimer);
+  }, [view, currentResult, isInspectionRunning, dashboardRedirectCountdown]);
 
   useEffect(() => {
     const availableTraceIds = new Set(
@@ -216,6 +249,8 @@ export function App() {
     setSelectedTraceIds([]);
     setSelectedInspection(null);
     setCurrentResult(null);
+    setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
 
     try {
       await logoutAccount();
@@ -262,14 +297,19 @@ export function App() {
   async function handleSubmit(event) {
     event.preventDefault();
     setIsInspectionRunning(true);
+    setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     setCurrentResult(null);
     setError("");
 
     if (!form.image_base64 && !form.image_url.trim()) {
       setError("Please upload an image or provide an image URL.");
       setIsInspectionRunning(false);
+      setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
       return;
     }
+
+    let didCompleteInspection = false;
 
     try {
       const controller = new AbortController();
@@ -292,10 +332,16 @@ export function App() {
           notes: form.notes,
         },
       };
-      const inspection = await submitInspection(payload, { signal: controller.signal });
+      const inspection = await submitInspectionWithProgress(payload, {
+        signal: controller.signal,
+        onProgress: handleWorkflowProgress,
+      });
 
+      didCompleteInspection = true;
       setCurrentResult(inspection);
       setSelectedInspection(inspection);
+      setWorkflowStageStatuses(createWorkflowStageStatuses("completed"));
+      setDashboardRedirectCountdown(DASHBOARD_REDIRECT_DELAY_SECONDS);
       await loadInspectionHistory({ silent: true });
     } catch (requestError) {
       if (requestError.name === "AbortError") {
@@ -307,7 +353,26 @@ export function App() {
     } finally {
       activeInspectionController.current = null;
       setIsInspectionRunning(false);
+      if (!didCompleteInspection) {
+        setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+        setDashboardRedirectCountdown(null);
+      }
     }
+  }
+
+  function handleWorkflowProgress(event) {
+    if (event.type === "workflow_started") {
+      setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+      return;
+    }
+
+    if (event.type !== "stage_status") {
+      return;
+    }
+
+    setWorkflowStageStatuses((currentStatuses) =>
+      applyWorkflowStageEvent(currentStatuses, event)
+    );
   }
 
   function handleStopInspection() {
@@ -318,6 +383,8 @@ export function App() {
 
     setCurrentResult(null);
     setSelectedInspection(null);
+    setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     setError("");
   }
 
@@ -329,6 +396,7 @@ export function App() {
         ? await fetchInspectionByTrace(inspection.trace_id)
         : inspection;
 
+      setDashboardRedirectCountdown(null);
       setSelectedInspection(detail);
       setCurrentResult(detail);
       setView("detail");
@@ -432,12 +500,16 @@ export function App() {
     setView("new");
     setCurrentResult(null);
     setSelectedInspection(null);
+    setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     setError("");
   }
 
   function goToDashboard() {
     setView("dashboard");
     setSelectedInspection(null);
+    setWorkflowStageStatuses(createWorkflowStageStatuses("waiting"));
+    setDashboardRedirectCountdown(null);
     loadInspectionHistory({ silent: true });
   }
 
@@ -501,6 +573,7 @@ export function App() {
           result={currentResult}
           isRunning={isInspectionRunning}
           isReportDownloading={isReportDownloading}
+          dashboardRedirectCountdown={dashboardRedirectCountdown}
           onFieldChange={updateField}
           onImageUpload={handleImageUpload}
           onSubmit={handleSubmit}
@@ -674,6 +747,7 @@ function NewInspectionView({
   result,
   isRunning,
   isReportDownloading,
+  dashboardRedirectCountdown,
   onFieldChange,
   onImageUpload,
   onSubmit,
@@ -698,6 +772,12 @@ function NewInspectionView({
             <StatusPill value={result.final_decision?.final_decision || "-"} />
             <StatusPill value={result.severity_assessment?.severity || "-"} />
             <span>{formatPercent(result.confidence_score)} confidence</span>
+            {dashboardRedirectCountdown !== null ? (
+              <span>
+                Dashboard opens in {dashboardRedirectCountdown}{" "}
+                {dashboardRedirectCountdown === 1 ? "second" : "seconds"}
+              </span>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -1194,7 +1274,47 @@ function isPlaceholderNotificationText(value) {
   ].includes(withoutNotificationLabel);
 }
 
-function buildWorkflowSteps({ isInspectionRunning, result }) {
+function createWorkflowStageStatuses(status = "waiting") {
+  return workflowDefinitions.reduce(
+    (statuses, step) => ({
+      ...statuses,
+      [step.key]: status,
+    }),
+    {}
+  );
+}
+
+function applyWorkflowStageEvent(currentStatuses, event) {
+  const stageIndex = workflowDefinitions.findIndex((step) => step.key === event.stage);
+
+  if (stageIndex === -1) {
+    return currentStatuses;
+  }
+
+  if (event.status === "failed") {
+    return {
+      ...currentStatuses,
+      [event.stage]: "failed",
+    };
+  }
+
+  if (event.status !== "running" && event.status !== "completed") {
+    return currentStatuses;
+  }
+
+  return workflowDefinitions.reduce((statuses, step, index) => {
+    if (event.status === "running") {
+      statuses[step.key] =
+        index < stageIndex ? "completed" : index === stageIndex ? "running" : "waiting";
+      return statuses;
+    }
+
+    statuses[step.key] = index <= stageIndex ? "completed" : "waiting";
+    return statuses;
+  }, {});
+}
+
+function buildWorkflowSteps({ stageStatuses, result }) {
   if (result) {
     return workflowDefinitions.map((step) => ({
       ...step,
@@ -1203,19 +1323,18 @@ function buildWorkflowSteps({ isInspectionRunning, result }) {
     }));
   }
 
-  if (isInspectionRunning) {
-    return workflowDefinitions.map((step, index) => ({
-      ...step,
-      status: index === 0 ? "Running" : "Waiting",
-      statusTone: index === 0 ? "running" : "waiting",
-    }));
-  }
-
   return workflowDefinitions.map((step) => ({
     ...step,
-    status: "Waiting",
-    statusTone: "waiting",
+    status: getWorkflowStatusLabel(stageStatuses[step.key]),
+    statusTone: stageStatuses[step.key] || "waiting",
   }));
+}
+
+function getWorkflowStatusLabel(status) {
+  if (status === "running") return "Running";
+  if (status === "completed") return "Completed";
+  if (status === "failed") return "Failed";
+  return "Waiting";
 }
 
 function getInspectionStatus(inspection) {

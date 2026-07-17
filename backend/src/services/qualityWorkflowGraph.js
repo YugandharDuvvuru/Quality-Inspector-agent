@@ -13,6 +13,7 @@ const InspectionState = Annotation.Root({
   input: Annotation(),
   confidenceThreshold: Annotation(),
   bedrockEnabled: Annotation(),
+  onStageProgress: Annotation(),
   fallbackReasons: Annotation(),
   bedrockInteractions: Annotation(),
   visionResult: Annotation(),
@@ -24,15 +25,15 @@ const InspectionState = Annotation.Root({
 });
 
 const compiledWorkflow = new StateGraph(InspectionState)
-  .addNode("visionInspector", runVisionInspectorStage)
-  .addNode("severityClassifier", runSeverityClassifierStage)
-  .addNode("rootCauseAnalyst", runRootCauseAnalystStage)
-  .addNode("decisionAction", runDecisionActionStage)
-  .addNode("escalationNotify", runEscalationNotifyStage)
+  .addNode("visionInspector", withStageProgress("vision", runVisionInspectorStage))
+  .addNode("severityClassifier", withStageProgress("severity", runSeverityClassifierStage))
+  .addNode("rootCauseAnalyst", withStageProgress("rootCause", runRootCauseAnalystStage))
+  .addNode("decisionAction", withStageProgress("decision", runDecisionActionStage))
+  .addNode("escalationNotify", withStageProgress("notify", runEscalationNotifyStage))
   .addNode("finalize", runFinalizeNode)
   .addEdge(START, "visionInspector")
   .addEdge("visionInspector", "severityClassifier")
-  .addConditionalEdges("severityClassifier", routeAfterSeverity)
+  .addEdge("severityClassifier", "rootCauseAnalyst")
   .addEdge("rootCauseAnalyst", "decisionAction")
   .addEdge("decisionAction", "escalationNotify")
   .addEdge("escalationNotify", "finalize")
@@ -43,11 +44,13 @@ export async function runQualityInspectionWorkflow({
   input,
   confidenceThreshold,
   bedrockEnabled,
+  onStageProgress,
 }) {
   const graphResult = await compiledWorkflow.invoke({
     input,
     confidenceThreshold,
     bedrockEnabled,
+    onStageProgress,
     fallbackReasons: [],
     bedrockInteractions: [],
   });
@@ -58,6 +61,49 @@ export async function runQualityInspectionWorkflow({
       bedrockInteractions: graphResult.bedrockInteractions || [],
     },
   };
+}
+
+function withStageProgress(stageKey, runStage) {
+  return async (state) => {
+    await notifyStageProgress(state, {
+      stage: stageKey,
+      status: "running",
+    });
+
+    try {
+      const stageUpdate = await runStage(state);
+
+      await notifyStageProgress(state, {
+        stage: stageKey,
+        status: "completed",
+      });
+
+      return stageUpdate;
+    } catch (error) {
+      await notifyStageProgress(state, {
+        stage: stageKey,
+        status: "failed",
+        message: error.message,
+      });
+
+      throw error;
+    }
+  };
+}
+
+async function notifyStageProgress(state, event) {
+  if (!state.onStageProgress) {
+    return;
+  }
+
+  try {
+    await state.onStageProgress({
+      type: "stage_status",
+      ...event,
+    });
+  } catch (error) {
+    console.warn(`[inspection] failed to emit stage progress. reason=${error.message}`);
+  }
 }
 
 async function runFinalizeNode(state) {
@@ -81,14 +127,6 @@ async function runFinalizeNode(state) {
       fallback_reason: formatFallbackReasons(state.fallbackReasons || []),
     },
   };
-}
-
-function routeAfterSeverity(state) {
-  return hasDefects(state) ? "rootCauseAnalyst" : "decisionAction";
-}
-
-function hasDefects(state) {
-  return Boolean(state.visionResult?.inspection_summary?.defects_detected?.length);
 }
 
 function buildSkippedRootCauseAnalysis(visionResult) {
