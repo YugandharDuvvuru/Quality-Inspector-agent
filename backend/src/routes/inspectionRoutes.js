@@ -79,6 +79,73 @@ inspectionRouter.delete("/", requireRole("ADMIN"), async (req, res, next) => {
   }
 });
 
+inspectionRouter.post("/stream", async (req, res, next) => {
+  try {
+    const parsed = inspectionSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Invalid inspection payload",
+        details: parsed.error.flatten(),
+      });
+    }
+
+    let isResponseClosed = false;
+    res.on("close", () => {
+      isResponseClosed = true;
+    });
+
+    const sendStreamEvent = (event) => {
+      if (isResponseClosed) {
+        return;
+      }
+
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    sendStreamEvent({ type: "workflow_started" });
+
+    const result = await runInspection(
+      {
+        ...parsed.data,
+        timestamp: parsed.data.timestamp || new Date().toISOString(),
+      },
+      req.user,
+      {
+        onStageProgress: sendStreamEvent,
+      }
+    );
+
+    sendStreamEvent({ type: "inspection_completed", result });
+
+    return res.end();
+  } catch (error) {
+    if (!res.headersSent) {
+      return next(error);
+    }
+
+    if (!res.writableEnded && !res.destroyed) {
+      res.write(
+        `data: ${JSON.stringify({
+          type: "inspection_failed",
+          message: error.message || "Inspection failed",
+        })}\n\n`
+      );
+    }
+
+    if (!res.writableEnded && !res.destroyed) {
+      return res.end();
+    }
+
+    return undefined;
+  }
+});
+
 inspectionRouter.get("/trace/:traceId/report.pdf", async (req, res, next) => {
   try {
     const reportData = await getInspectionReportDataByTraceId(req.params.traceId, req.user);

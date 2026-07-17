@@ -114,7 +114,7 @@ export async function deleteInspectionsByTraceIds(traceIds) {
   }
 }
 
-export async function runInspection(input, viewer) {
+export async function runInspection(input, viewer, options = {}) {
   const preparedInput = await prepareInspectionImageInput(input);
 
   console.log(
@@ -125,6 +125,7 @@ export async function runInspection(input, viewer) {
     input: preparedInput,
     confidenceThreshold: CONFIDENCE_THRESHOLD,
     bedrockEnabled: env.BEDROCK_ENABLED,
+    onStageProgress: options.onStageProgress,
   });
   const enterpriseIntegrations = await executeEnterpriseIntegrations({
     input: preparedInput,
